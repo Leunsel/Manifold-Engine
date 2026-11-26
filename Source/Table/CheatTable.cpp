@@ -352,6 +352,34 @@ namespace Manifold::Table
             }
         }
 
+        StructField ReadElement(const Xml::Node& element)
+        {
+            StructField field;
+            field.Offset = static_cast<int>(std::clamp<std::int64_t>(ParseDecimal(element.Attribute("Offset").value_or("0")).value_or(0), -kMaxFieldOffset, kMaxFieldOffset));
+            field.Name = element.Attribute("Description").value_or("");
+            const std::string type = element.Attribute("Vartype").value_or("4 Bytes");
+            field.Type = Scan::TypeFromTableName(type).value_or(Scan::ValueType::FourBytes);
+            field.Unicode = EqualsNoCase(type, "Unicode String");
+            field.Size = static_cast<int>(std::clamp<std::int64_t>(ParseDecimal(element.Attribute("Bytesize").value_or("4")).value_or(4), 1, kMaxFieldBytes));
+            const std::string display = element.Attribute("DisplayMethod").value_or("");
+            field.Display = EqualsNoCase(display, "hexadecimal") ? FieldDisplay::Hex : EqualsNoCase(display, "signed integer") ? FieldDisplay::Signed :
+                EqualsNoCase(display, "binary") ? FieldDisplay::Binary : FieldDisplay::Unsigned;
+            field.ChildStructure = element.Attribute("ChildStruct").value_or("");
+            if (field.Type == Scan::ValueType::Binary)
+            {
+                field.BitStart = static_cast<int>(std::clamp<std::int64_t>(ParseDecimal(element.Attribute("BitStart").value_or("0")).value_or(0), 0, 63));
+                field.BitLength = static_cast<int>(std::clamp<std::int64_t>(ParseDecimal(element.Attribute("BitLength").value_or("1")).value_or(1), 1, 64 - field.BitStart));
+                field.Size = BitFieldSize(field.BitStart, field.BitLength);
+            }
+            if (EqualsNoCase(type, "Custom"))
+            {
+                field.Type = Scan::ValueType::ByteArray;
+                // ∑ Cheat Engine spells it "Customtype", Manifold tables "CustomType": fields copied in CE lost their custom type.
+                field.CustomType = element.Attribute("Customtype").value_or(element.Attribute("CustomType").value_or(""));
+            }
+            return field;
+        }
+
         std::unique_ptr<StructDefinition> ReadStructure(const Xml::Node& node)
         {
             auto definition = std::make_unique<StructDefinition>();
@@ -360,33 +388,30 @@ namespace Manifold::Table
             if (!elements)
                 return definition;
             for (const Xml::Node* element : elements->ChildrenNamed("Element"))
-            {
-                StructField field;
-                field.Offset = static_cast<int>(std::clamp<std::int64_t>(ParseDecimal(element->Attribute("Offset").value_or("0")).value_or(0), -kMaxFieldOffset, kMaxFieldOffset));
-                field.Name = element->Attribute("Description").value_or("");
-                const std::string type = element->Attribute("Vartype").value_or("4 Bytes");
-                field.Type = Scan::TypeFromTableName(type).value_or(Scan::ValueType::FourBytes);
-                field.Unicode = EqualsNoCase(type, "Unicode String");
-                field.Size = static_cast<int>(std::clamp<std::int64_t>(ParseDecimal(element->Attribute("Bytesize").value_or("4")).value_or(4), 1, kMaxFieldBytes));
-                const std::string display = element->Attribute("DisplayMethod").value_or("");
-                field.Display = EqualsNoCase(display, "hexadecimal") ? FieldDisplay::Hex : EqualsNoCase(display, "signed integer") ? FieldDisplay::Signed :
-                    EqualsNoCase(display, "binary") ? FieldDisplay::Binary : FieldDisplay::Unsigned;
-                field.ChildStructure = element->Attribute("ChildStruct").value_or("");
-                if (field.Type == Scan::ValueType::Binary)
-                {
-                    field.BitStart = static_cast<int>(std::clamp<std::int64_t>(ParseDecimal(element->Attribute("BitStart").value_or("0")).value_or(0), 0, 63));
-                    field.BitLength = static_cast<int>(std::clamp<std::int64_t>(ParseDecimal(element->Attribute("BitLength").value_or("1")).value_or(1), 1, 64 - field.BitStart));
-                    field.Size = BitFieldSize(field.BitStart, field.BitLength);
-                }
-                if (EqualsNoCase(type, "Custom"))
-                {
-                    field.Type = Scan::ValueType::ByteArray;
-                    field.CustomType = element->Attribute("CustomType").value_or("");
-                }
-                definition->Fields.push_back(std::move(field));
-            }
+                definition->Fields.push_back(ReadElement(*element));
             definition->Sort();
             return definition;
+        }
+
+        Xml::Node& WriteElement(Xml::Node& elements, const StructField& field)
+        {
+            Xml::Node& element = elements.Add("Element");
+            element.SetAttribute("Offset", std::to_string(field.Offset));
+            element.SetAttribute("Vartype", !field.CustomType.empty() ? "Custom" : field.Type == Scan::ValueType::String && field.Unicode ? "Unicode String" : Scan::TableTypeName(field.Type));
+            if (!field.CustomType.empty())
+                element.SetAttribute("CustomType", field.CustomType);
+            element.SetAttribute("Bytesize", std::to_string(field.Size));
+            element.SetAttribute("OffsetHex", Hex(static_cast<std::uint64_t>(field.Offset), 8));
+            element.SetAttribute("Description", field.Name);
+            element.SetAttribute("DisplayMethod", DisplayName(field.Display));
+            if (field.Type == Scan::ValueType::Binary && field.CustomType.empty())
+            {
+                element.SetAttribute("BitStart", std::to_string(field.BitStart));
+                element.SetAttribute("BitLength", std::to_string(field.BitLength));
+            }
+            if (!field.ChildStructure.empty())
+                element.SetAttribute("ChildStruct", field.ChildStructure);
+            return element;
         }
     }
 
@@ -556,24 +581,7 @@ namespace Manifold::Table
                 structure.SetAttribute("AutoCreateStructsize", "4096");
                 Xml::Node& elements = structure.Add("Elements");
                 for (const StructField& field : definition->Fields)
-                {
-                    Xml::Node& element = elements.Add("Element");
-                    element.SetAttribute("Offset", std::to_string(field.Offset));
-                    element.SetAttribute("Vartype", !field.CustomType.empty() ? "Custom" : field.Type == Scan::ValueType::String && field.Unicode ? "Unicode String" : Scan::TableTypeName(field.Type));
-                    if (!field.CustomType.empty())
-                        element.SetAttribute("CustomType", field.CustomType);
-                    element.SetAttribute("Bytesize", std::to_string(field.Size));
-                    element.SetAttribute("OffsetHex", Hex(static_cast<std::uint64_t>(field.Offset), 8));
-                    element.SetAttribute("Description", field.Name);
-                    element.SetAttribute("DisplayMethod", DisplayName(field.Display));
-                    if (field.Type == Scan::ValueType::Binary && field.CustomType.empty())
-                    {
-                        element.SetAttribute("BitStart", std::to_string(field.BitStart));
-                        element.SetAttribute("BitLength", std::to_string(field.BitLength));
-                    }
-                    if (!field.ChildStructure.empty())
-                        element.SetAttribute("ChildStruct", field.ChildStructure);
-                }
+                    WriteElement(elements, field);
             }
         }
         if (!list.Files.empty())
@@ -646,6 +654,81 @@ namespace Manifold::Table
         for (const MemoryRecord* record : records)
             WriteEntry(entries, *record);
         return Xml::Write(root);
+    }
+
+    namespace
+    {
+        constexpr int kMaxNestedStructures = 64;
+
+        void WriteNestedStructures(Xml::Node& element, const StructureStore& store, const StructField& field, std::set<std::string>& written, int depth)
+        {
+            if (field.ChildStructure.empty() || depth > kMaxNestedStructures || static_cast<int>(written.size()) >= kMaxNestedStructures)
+                return;
+            const StructDefinition* child = store.Find(field.ChildStructure);
+            if (!child || !written.insert(Lower(child->Name)).second)
+                return;
+            Xml::Node& structure = element.Add("Structure");
+            structure.SetAttribute("Name", child->Name);
+            Xml::Node& elements = structure.Add("Elements");
+            for (const StructField& inner : child->Fields)
+                WriteNestedStructures(WriteElement(elements, inner), store, inner, written, depth + 1);
+        }
+
+        void ReadNestedStructures(const Xml::Node& elements, PastedFields& pasted, std::set<std::string>& seen, int depth)
+        {
+            if (depth > kMaxNestedStructures)
+                return;
+            for (const Xml::Node* element : elements.ChildrenNamed("Element"))
+            {
+                const Xml::Node* structure = element->Child("Structure");
+                if (!structure || static_cast<int>(pasted.Structures.size()) >= kMaxNestedStructures)
+                    continue;
+                std::unique_ptr<StructDefinition> definition = ReadStructure(*structure);
+                if (!seen.insert(Lower(definition->Name)).second)
+                    continue;
+                if (const Xml::Node* inner = structure->Child("Elements"))
+                    ReadNestedStructures(*inner, pasted, seen, depth + 1);
+                pasted.Structures.push_back(std::move(definition));
+            }
+        }
+    }
+
+    // ∑ The same text Cheat Engine's structure dissect puts on the clipboard: <Elements> with one <Element> per field, no XML
+    //   header (CE offers Paste only when the text starts with "<Elements"). A child structure goes along inside its element
+    //   as <Structure>, the way CE copies a local one, so the fields still make sense in another table.
+    std::string FieldsToXml(const StructureStore& store, std::span<const StructField> fields)
+    {
+        Xml::Node root;
+        root.Name = "Elements";
+        std::set<std::string> written;
+        for (const StructField& field : fields)
+        {
+            Xml::Node& element = WriteElement(root, field);
+            if (!field.CustomType.empty())
+                element.SetAttribute("Customtype", field.CustomType);
+            WriteNestedStructures(element, store, field, written, 0);
+        }
+        return Xml::Write(root, false);
+    }
+
+    std::optional<PastedFields> FieldsFromXml(std::string_view text)
+    {
+        Xml::ParseResult parsed = Xml::Parse(TrimView(text));
+        if (!parsed.Root)
+            return std::nullopt;
+        const Xml::Node* elements = parsed.Root.get();
+        if (elements->Name == "Structure")
+            elements = elements->Child("Elements");
+        if (!elements || elements->Name != "Elements")
+            return std::nullopt;
+        PastedFields pasted;
+        for (const Xml::Node* element : elements->ChildrenNamed("Element"))
+            pasted.Fields.push_back(ReadElement(*element));
+        if (pasted.Fields.empty())
+            return std::nullopt;
+        std::set<std::string> seen;
+        ReadNestedStructures(*elements, pasted, seen, 0);
+        return pasted;
     }
 
     std::optional<std::vector<std::uint8_t>> DecodeTableFile(std::string_view text, std::size_t limit)

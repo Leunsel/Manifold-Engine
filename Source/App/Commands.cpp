@@ -185,6 +185,12 @@ namespace Manifold
             { BrowseFieldPointer, "BrowseFieldPointer", Scope::Structure, "Browse Pointer Target", ImGuiKey_F, 0, CE },
             { FieldAccesses, "FieldAccesses", Scope::Structure, "Find Out What Accesses This Field", ImGuiKey_F5, 0, Own },
             { FieldWrites, "FieldWrites", Scope::Structure, "Find Out What Writes to This Field", ImGuiKey_F6, 0, Own },
+            { ChangeFieldOffset, "ChangeFieldOffset", Scope::Structure, "Change Field Offset", Shift | ImGuiKey_Enter, 0, Own },
+            { CopyFields, "CopyFields", Scope::Structure, "Copy Fields", Ctrl | ImGuiKey_C, 0, CE },
+            { PasteFields, "PasteFields", Scope::Structure, "Paste Fields", Ctrl | ImGuiKey_V, 0, CE },
+            { PasteFieldsInPlace, "PasteFieldsInPlace", Scope::Structure, "Paste Fields at Their Offsets", Ctrl | Shift | ImGuiKey_V, 0, Own },
+            { UndoStructureEdit, "UndoStructureEdit", Scope::Structure, "Undo Structure Edit", Ctrl | ImGuiKey_Z, 0, Own },
+            { RedoStructureEdit, "RedoStructureEdit", Scope::Structure, "Redo Structure Edit", Ctrl | ImGuiKey_Y, Ctrl | Shift | ImGuiKey_Z, Own },
 
             { ScriptNewWindow, "ScriptNewWindow", Scope::ScriptEditor, "New Auto Assembler Window", Ctrl | ImGuiKey_N, 0, CE },
             { ScriptOpen, "ScriptOpen", Scope::ScriptEditor, "Open Script", Ctrl | ImGuiKey_O, 0, CE },
@@ -544,7 +550,7 @@ namespace Manifold
         case CommandScope::MemoryViewer: return "While a memory viewer window has the focus.";
         case CommandScope::Disassembler: return "While the disassembler pane has the focus. The keys act on the selected instruction.";
         case CommandScope::HexView: return "While the hex view pane has the focus. The keys act on the selected byte.";
-        case CommandScope::Structure: return "While a Structure Dissect window has the focus. Field keys act on the selected field. The arrow keys, Page Up, Page Down, Home and End move through the fields (Shift extends the selection); Right opens a pointer or an embedded structure and then steps into it, Left closes it and then steps out.";
+        case CommandScope::Structure: return "While a Structure Dissect window has the focus. Field keys act on the selected field; Copy Fields takes the selected fields, Paste Fields puts them at the selected field with their distances kept. The arrow keys, Page Up, Page Down, Home and End move through the fields (Shift extends the selection); Right opens a pointer or an embedded structure and then steps into it, Left closes it and then steps out.";
         case CommandScope::ScriptEditor: return "While an Auto Assembler or script window has the focus. Template keys come from each template's Shortcut setting; the ones listed are the built-in templates.";
         case CommandScope::LuaEngine: return "While the Lua Engine window has the focus.";
         case CommandScope::CodeEditor: return "While the cursor is in a code editor: the Lua engine, Auto Assembler and script windows, the Templates window and Table Files. Find Next and Find Previous also work while typing.";

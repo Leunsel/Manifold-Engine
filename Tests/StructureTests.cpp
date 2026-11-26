@@ -5,6 +5,7 @@
 #include "Core/Text.h"
 #include "Scan/StaticPointers.h"
 #include "Table/AddressList.h"
+#include "Table/CheatTable.h"
 #include "Table/ManagedStructures.h"
 #include "Table/Structures.h"
 #include "Target/Process.h"
@@ -15,6 +16,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace Manifold::Tests
@@ -278,6 +280,298 @@ namespace Manifold::Tests
         }
     }
 
+    namespace
+    {
+        Table::StructField MakeField(int offset, std::string name, Scan::ValueType type, int size)
+        {
+            Table::StructField field;
+            field.Offset = offset;
+            field.Name = std::move(name);
+            field.Type = type;
+            field.Size = size;
+            return field;
+        }
+
+        Table::StructField MakeBits(int offset, std::string name, int start, int length)
+        {
+            Table::StructField field = MakeField(offset, std::move(name), Scan::ValueType::Binary, Table::BitFieldSize(start, length));
+            field.BitStart = start;
+            field.BitLength = length;
+            return field;
+        }
+
+        std::vector<std::string> Names(const Table::StructDefinition& definition)
+        {
+            std::vector<std::string> names;
+            for (const Table::StructField& field : definition.Fields)
+                names.push_back(field.Name);
+            return names;
+        }
+
+        void OffsetParsing()
+        {
+            CHECK(Table::ParseFieldOffset("1C") == 0x1C);
+            CHECK(Table::ParseFieldOffset(" +0x1c ") == 0x1C);
+            CHECK(Table::ParseFieldOffset("-8") == -8);
+            CHECK(Table::ParseFieldOffset("0") == 0);
+            CHECK(Table::ParseFieldOffset("10000000") == Table::kMaxFieldOffset);
+            CHECK(!Table::ParseFieldOffset("10000001"));
+            CHECK(!Table::ParseFieldOffset("-10000001"));
+            CHECK(!Table::ParseFieldOffset(""));
+            CHECK(!Table::ParseFieldOffset("+"));
+            CHECK(!Table::ParseFieldOffset("+-8"));
+            CHECK(!Table::ParseFieldOffset("12G"));
+            CHECK(!Table::ParseFieldOffset("FFFFFFFFFFFFFFFF"));
+            CHECK_EQ(Table::FieldOffsetText(0x48), std::string("+0048"));
+            CHECK_EQ(Table::FieldOffsetText(-8), std::string("-0008"));
+        }
+
+        void OverlapRules()
+        {
+            const Table::StructField dword = MakeField(0x10, "Dword", Scan::ValueType::FourBytes, 4);
+            CHECK(Table::FieldsOverlap(dword, MakeField(0x13, "Byte", Scan::ValueType::Byte, 1), 8));
+            CHECK(!Table::FieldsOverlap(dword, MakeField(0x14, "Next", Scan::ValueType::Byte, 1), 8));
+            CHECK(!Table::FieldsOverlap(dword, MakeField(0x0C, "Before", Scan::ValueType::FourBytes, 4), 8));
+            // A pointer is as wide as the target's pointers, whatever its stored size.
+            const Table::StructField pointer = MakeField(0x20, "Pointer", Scan::ValueType::Pointer, 8);
+            CHECK(!Table::FieldsOverlap(pointer, MakeField(0x24, "After", Scan::ValueType::FourBytes, 4), 4));
+            CHECK(Table::FieldsOverlap(pointer, MakeField(0x24, "After", Scan::ValueType::FourBytes, 4), 8));
+            // Bit fields share a byte without overlapping; a byte over them overlaps both.
+            const Table::StructField low = MakeBits(0x30, "Low", 0, 3);
+            const Table::StructField high = MakeBits(0x30, "High", 3, 5);
+            CHECK(!Table::FieldsOverlap(low, high, 8));
+            CHECK(Table::FieldsOverlap(low, MakeBits(0x30, "Mid", 2, 2), 8));
+            CHECK(Table::FieldsOverlap(high, MakeField(0x30, "Flags", Scan::ValueType::Byte, 1), 8));
+
+            Table::StructDefinition definition;
+            definition.Fields = { dword, MakeField(0x14, "B", Scan::ValueType::FourBytes, 4), MakeField(0x18, "C", Scan::ValueType::FourBytes, 4) };
+            const auto found = definition.Overlapping(MakeField(0x12, "Probe", Scan::ValueType::FourBytes, 4), 8);
+            CHECK(found == (std::vector<std::size_t>{ 0, 1 }));
+            CHECK(definition.Overlapping(definition.Fields[1], 8, 1).empty());
+        }
+
+        void MovingFields()
+        {
+            Table::StructDefinition definition;
+            definition.Fields = { MakeField(0, "A", Scan::ValueType::FourBytes, 4), MakeField(4, "B", Scan::ValueType::FourBytes, 4), MakeField(8, "C", Scan::ValueType::FourBytes, 4),
+                MakeField(0x10, "D", Scan::ValueType::EightBytes, 8) };
+
+            // Into a gap: the definition is sorted again and the result says where the field went.
+            Table::FieldMove moved = Table::MoveField(definition, 0, 0xC, Table::FieldOverlap::Keep, 8);
+            CHECK(Names(definition) == (std::vector<std::string>{ "B", "C", "A", "D" }));
+            CHECK(moved.Index == 2 && moved.Twin == 0 && moved.Replaced == 0);
+
+            // Over D with Replace: D goes.
+            moved = Table::MoveField(definition, 0, 0x14, Table::FieldOverlap::Replace, 8);
+            CHECK(Names(definition) == (std::vector<std::string>{ "C", "A", "B" }));
+            CHECK(moved.Index == 2 && moved.Replaced == 1 && definition.Fields[2].Offset == 0x14);
+
+            // Onto C with Keep Both: a twin after the field that was there first.
+            moved = Table::MoveField(definition, 2, 8, Table::FieldOverlap::Keep, 8);
+            CHECK(Names(definition) == (std::vector<std::string>{ "C", "B", "A" }));
+            CHECK(moved.Index == 1 && moved.Twin == 1 && moved.Replaced == 0);
+
+            // Backwards over several, with Replace: the index counts the fields removed before it.
+            definition.Fields = { MakeField(0, "A", Scan::ValueType::Byte, 1), MakeField(1, "B", Scan::ValueType::Byte, 1), MakeField(2, "C", Scan::ValueType::Byte, 1),
+                MakeField(8, "Wide", Scan::ValueType::FourBytes, 4) };
+            moved = Table::MoveField(definition, 3, 0, Table::FieldOverlap::Replace, 8);
+            CHECK(Names(definition) == (std::vector<std::string>{ "Wide" }));
+            CHECK(moved.Index == 0 && moved.Replaced == 3);
+
+            // Out of range is clamped by the model; the window refuses it before.
+            Table::MoveField(definition, 0, Table::kMaxFieldOffset + 100, Table::FieldOverlap::Keep, 8);
+            CHECK_EQ(definition.Fields[0].Offset, Table::kMaxFieldOffset);
+            Table::MoveField(definition, 5, 0, Table::FieldOverlap::Keep, 8);
+            CHECK_EQ(definition.Fields.size(), 1u);
+        }
+
+        void PastingFields()
+        {
+            Table::StructDefinition definition;
+            definition.Fields = { MakeField(0, "A", Scan::ValueType::FourBytes, 4), MakeField(0x40, "Guess 40", Scan::ValueType::FourBytes, 4),
+                MakeField(0x48, "Guess 48", Scan::ValueType::FourBytes, 4), MakeField(0x50, "Keep", Scan::ValueType::FourBytes, 4) };
+            // Copied out of order (as a selection may be), with a gap: the distances stay.
+            const std::vector<Table::StructField> copied = { MakeField(0x18, "Y", Scan::ValueType::Float, 4), MakeField(0x10, "X", Scan::ValueType::Float, 4),
+                MakeField(0x1C, "Z", Scan::ValueType::Float, 4) };
+            const auto pasted = Table::PasteFields(definition, copied, 0x40, 8);
+            CHECK(pasted && pasted->Added == 3 && pasted->Replaced == 2 && pasted->First == 0x40);
+            CHECK(Names(definition) == (std::vector<std::string>{ "A", "X", "Y", "Z", "Keep" }));
+            CHECK(definition.Fields[1].Offset == 0x40 && definition.Fields[2].Offset == 0x48 && definition.Fields[3].Offset == 0x4C);
+
+            // At their own offsets.
+            Table::StructDefinition other;
+            const auto inPlace = Table::PasteFields(other, copied, std::nullopt, 8);
+            CHECK(inPlace && inPlace->First == 0x10 && other.Fields.size() == 3 && other.Fields[0].Offset == 0x10 && other.Fields[2].Offset == 0x1C);
+
+            // Pasted bit fields keep their neighbours in the same byte.
+            Table::StructDefinition flags;
+            flags.Fields = { MakeBits(0, "Low", 0, 4) };
+            CHECK(Table::PasteFields(flags, { MakeBits(0, "High", 4, 4) }, std::nullopt, 8)->Replaced == 0);
+            CHECK_EQ(flags.Fields.size(), 2u);
+
+            // Beyond the limit: nothing changes.
+            const std::vector<Table::StructField> before = definition.Fields;
+            CHECK(!Table::PasteFields(definition, copied, Table::kMaxFieldOffset - 4, 8));
+            CHECK(!Table::PasteFields(definition, copied, -Table::kMaxFieldOffset - 1, 8));
+            CHECK(definition.Fields == before);
+            CHECK(Table::PasteFields(definition, {}, 0, 8)->Added == 0);
+        }
+
+        void ClipboardFormat()
+        {
+            Table::StructureStore store;
+            Table::StructDefinition& vector = store.Add("Vector3");
+            vector.Fields = { MakeField(0, "X", Scan::ValueType::Float, 4), MakeField(4, "Y", Scan::ValueType::Float, 4), MakeField(8, "Z", Scan::ValueType::Float, 4) };
+            Table::StructDefinition& loop = store.Add("Loop");
+            loop.Fields = { MakeField(0, "Self", Scan::ValueType::Pointer, 8) };
+            loop.Fields[0].ChildStructure = "Loop";
+
+            std::vector<Table::StructField> fields = { MakeField(0x10, "Health", Scan::ValueType::Float, 4), MakeField(0x20, "Position", Scan::ValueType::ByteArray, 12),
+                MakeField(0x30, "Name", Scan::ValueType::String, 32), MakeBits(0x50, "Flag", 3, 2), MakeField(0x58, "Next", Scan::ValueType::Pointer, 8),
+                MakeField(0x60, "Money", Scan::ValueType::ByteArray, 4) };
+            fields[1].ChildStructure = "Vector3";
+            fields[2].Unicode = true;
+            fields[3].Display = Table::FieldDisplay::Binary;
+            fields[4].ChildStructure = "Loop";
+            fields[4].Display = Table::FieldDisplay::Hex;
+            fields[5].CustomType = "Money";
+
+            const std::string text = Table::FieldsToXml(store, fields);
+            // Cheat Engine offers Paste only for text that starts like this.
+            CHECK_MSG(text.rfind("<Elements", 0) == 0, text.substr(0, 40));
+            CHECK(text.find("Vartype=\"Unicode String\"") != std::string::npos);
+            CHECK(text.find("Customtype=\"Money\"") != std::string::npos);
+            CHECK(text.find("<Structure Name=\"Vector3\"") != std::string::npos);
+
+            const auto read = Table::FieldsFromXml(text);
+            CHECK(read.has_value());
+            if (read)
+            {
+                CHECK(read->Fields == fields);
+                CHECK_EQ(read->Structures.size(), 2u);
+                bool vectorBack = false;
+                for (const auto& child : read->Structures)
+                    vectorBack = vectorBack || (child->Name == "Vector3" && child->Fields == vector.Fields);
+                CHECK(vectorBack);
+            }
+
+            // What Cheat Engine 7.5 puts on the clipboard: no header, an empty description left out, a local child structure inside.
+            const char* cheatEngine =
+                "<Elements>\r\n"
+                "  <Element Offset=\"8\" OffsetHex=\"00000008\" Vartype=\"Pointer\" Bytesize=\"8\" DisplayMethod=\"unsigned integer\" ChildStruct=\"Inner\" Nested=\"1\">\r\n"
+                "    <Structure Name=\"Inner\" AutoFill=\"0\" AutoCreate=\"1\" DefaultHex=\"0\" AutoDestroy=\"0\" DoNotSaveLocal=\"0\" RLECompression=\"1\" AutoCreateStructsize=\"4096\">\r\n"
+                "      <Elements>\r\n"
+                "        <Element Offset=\"0\" OffsetHex=\"00000000\" Description=\"Count\" Vartype=\"4 Bytes\" Bytesize=\"4\" DisplayMethod=\"signed integer\"/>\r\n"
+                "      </Elements>\r\n"
+                "    </Structure>\r\n"
+                "  </Element>\r\n"
+                "  <Element Offset=\"16\" OffsetHex=\"00000010\" Description=\"Gold\" Vartype=\"Custom\" Customtype=\"Money\" Bytesize=\"4\" DisplayMethod=\"hexadecimal\"/>\r\n"
+                "</Elements>\r\n";
+            const auto fromCe = Table::FieldsFromXml(cheatEngine);
+            CHECK(fromCe.has_value());
+            if (fromCe)
+            {
+                CHECK_EQ(fromCe->Fields.size(), 2u);
+                CHECK(fromCe->Fields[0].Offset == 8 && fromCe->Fields[0].Name.empty() && fromCe->Fields[0].Type == Scan::ValueType::Pointer && fromCe->Fields[0].ChildStructure == "Inner");
+                CHECK(fromCe->Fields[1].CustomType == "Money" && fromCe->Fields[1].Display == Table::FieldDisplay::Hex && fromCe->Fields[1].Name == "Gold");
+                CHECK(fromCe->Structures.size() == 1 && fromCe->Structures[0]->Name == "Inner" && fromCe->Structures[0]->Fields.size() == 1 &&
+                      fromCe->Structures[0]->Fields[0].Display == Table::FieldDisplay::Signed);
+            }
+
+            CHECK(!Table::FieldsFromXml(""));
+            CHECK(!Table::FieldsFromXml("just text"));
+            CHECK(!Table::FieldsFromXml("<Elements></Elements>"));
+            CHECK(!Table::FieldsFromXml("<CheatTable><CheatEntries/></CheatTable>"));
+        }
+
+        void UndoHistory()
+        {
+            Table::StructureStore store;
+            Table::StructDefinition& definition = store.Add("Player");
+            definition.Fields = { MakeField(0, "A", Scan::ValueType::FourBytes, 4) };
+            Table::StructureHistory history;
+            CHECK(!history.Undo(store) && !history.Redo(store));
+
+            const auto edit = [&](const char* label, auto change, std::string merge = {}, std::uint64_t group = 0)
+                {
+                    std::vector<Table::StructField> before = definition.Fields;
+                    change();
+                    history.Record(definition.Name, std::move(before), definition.Fields, label, std::move(merge), group);
+                };
+            edit("Rename Field", [&]() { definition.Fields[0].Name = "Health"; });
+            edit("Change Offset", [&]() { Table::MoveField(definition, 0, 8, Table::FieldOverlap::Keep, 8); });
+            edit("Nothing", []() {});
+            CHECK_EQ(history.UndoCount(), 2u);
+            CHECK_EQ(history.UndoLabel(), std::string("Change Offset"));
+
+            auto undone = history.Undo(store);
+            CHECK(undone && undone->Label == "Change Offset" && !undone->Missing);
+            CHECK(definition.Fields[0].Offset == 0 && definition.Fields[0].Name == "Health");
+            CHECK(history.CanRedo() && history.RedoLabel() == "Change Offset");
+            history.Undo(store);
+            CHECK_EQ(definition.Fields[0].Name, std::string("A"));
+            history.Redo(store);
+            history.Redo(store);
+            CHECK(definition.Fields[0].Offset == 8 && definition.Fields[0].Name == "Health" && !history.CanRedo());
+
+            // A new edit drops what could be redone.
+            history.Undo(store);
+            edit("Rename Field", [&]() { definition.Fields[0].Name = "Armor"; });
+            CHECK(!history.CanRedo());
+
+            // Typing a length digit by digit is one step; back to the start it is none.
+            const std::size_t steps = history.UndoCount();
+            edit("Change Length", [&]() { definition.Fields[0].Size = 1; }, "length A");
+            edit("Change Length", [&]() { definition.Fields[0].Size = 12; }, "length A");
+            CHECK_EQ(history.UndoCount(), steps + 1);
+            history.Undo(store);
+            CHECK_EQ(definition.Fields[0].Size, 4);
+            edit("Change Length", [&]() { definition.Fields[0].Size = 5; }, "length A");
+            edit("Change Length", [&]() { definition.Fields[0].Size = 4; }, "length A");
+            CHECK_EQ(history.UndoCount(), steps);
+
+            // A group of steps over two structures is undone and redone at once.
+            Table::StructDefinition& other = store.Add("Enemy");
+            other.Fields = { MakeField(0, "E", Scan::ValueType::FourBytes, 4) };
+            {
+                std::vector<Table::StructField> before = definition.Fields;
+                definition.Fields.clear();
+                history.Record("Player", std::move(before), definition.Fields, "Delete Fields", {}, 7);
+                before = other.Fields;
+                other.Fields.clear();
+                history.Record("Enemy", std::move(before), other.Fields, "Delete Fields", {}, 7);
+            }
+            history.Undo(store);
+            CHECK(definition.Fields.size() == 1 && other.Fields.size() == 1);
+            history.Redo(store);
+            CHECK(definition.Fields.empty() && other.Fields.empty());
+            history.Undo(store);
+
+            // A renamed structure keeps its steps, and fields pointing to it follow.
+            history.Renamed("Player", "Hero");
+            definition.Name = "Hero";
+            edit("Rename Field", [&]() { definition.Fields[0].Name = "Shield"; });
+            CHECK(history.Undo(store) && definition.Fields[0].Name == "Armor");
+
+            // A structure that is gone: the step is dropped and said so.
+            edit("Rename Field", [&]() { definition.Fields[0].Name = "Gone"; });
+            store.Remove(definition);
+            auto missing = history.Undo(store);
+            CHECK(missing && missing->Missing && missing->Structure == "Hero");
+
+            // The stack has a limit.
+            Table::StructDefinition& many = store.Add("Many");
+            Table::StructureHistory bounded;
+            for (std::size_t i = 0; i < Table::StructureHistory::kLimit + 20; ++i)
+            {
+                std::vector<Table::StructField> before = many.Fields;
+                many.Fields.push_back(MakeField(static_cast<int>(i) * 4, "F", Scan::ValueType::FourBytes, 4));
+                bounded.Record("Many", std::move(before), many.Fields, "Add Field");
+            }
+            CHECK_EQ(bounded.UndoCount(), Table::StructureHistory::kLimit);
+        }
+    }
+
     int RunStructureTests()
     {
         const int before = Totals().Failures;
@@ -285,6 +579,12 @@ namespace Manifold::Tests
         MatchPointerBlocks();
         ManagedPointerWidth();
         EmbeddedToAddressList();
+        OffsetParsing();
+        OverlapRules();
+        MovingFields();
+        PastingFields();
+        ClipboardFormat();
+        UndoHistory();
         auto opened = Target::Process::Open(MakeProcessId(::GetCurrentProcessId()));
         CHECK(opened.Ok());
         if (opened.Ok())

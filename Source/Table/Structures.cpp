@@ -160,6 +160,236 @@ namespace Manifold::Table
         return bits <= 8 ? 1 : bits <= 16 ? 2 : bits <= 32 ? 4 : 8;
     }
 
+    int FieldByteWidth(const StructField& field, int pointerSize)
+    {
+        return field.Type == Scan::ValueType::Pointer ? std::max(1, pointerSize) : std::max(1, field.Size);
+    }
+
+    namespace
+    {
+        // [begin, end) in bits from bit 0 of the structure.
+        std::pair<std::int64_t, std::int64_t> BitRange(const StructField& field, int pointerSize)
+        {
+            const std::int64_t base = static_cast<std::int64_t>(field.Offset) * 8;
+            if (field.Type == Scan::ValueType::Binary && field.CustomType.empty())
+            {
+                const int start = std::clamp(field.BitStart, 0, 63);
+                return { base + start, base + start + std::clamp(field.BitLength, 1, 64 - start) };
+            }
+            return { base, base + static_cast<std::int64_t>(FieldByteWidth(field, pointerSize)) * 8 };
+        }
+    }
+
+    bool FieldsOverlap(const StructField& a, const StructField& b, int pointerSize)
+    {
+        const auto [aBegin, aEnd] = BitRange(a, pointerSize);
+        const auto [bBegin, bEnd] = BitRange(b, pointerSize);
+        return aBegin < bEnd && bBegin < aEnd;
+    }
+
+    std::optional<int> ParseFieldOffset(std::string_view text)
+    {
+        text = TrimView(text);
+        bool negative = false;
+        if (!text.empty() && (text.front() == '+' || text.front() == '-'))
+        {
+            negative = text.front() == '-';
+            text.remove_prefix(1);
+        }
+        // ParseHex takes a sign of its own; a second one ("+-8") is no offset.
+        if (text.empty() || text.front() == '+' || text.front() == '-')
+            return std::nullopt;
+        const std::optional<std::uint64_t> value = ParseHex(text);
+        if (!value || *value > static_cast<std::uint64_t>(kMaxFieldOffset))
+            return std::nullopt;
+        const int offset = static_cast<int>(*value);
+        return negative ? -offset : offset;
+    }
+
+    std::string FieldOffsetText(int offset)
+    {
+        return offset < 0 ? "-" + Hex(static_cast<std::uint64_t>(-static_cast<std::int64_t>(offset)), 4) : "+" + Hex(static_cast<std::uint64_t>(offset), 4);
+    }
+
+    std::vector<std::size_t> StructDefinition::Overlapping(const StructField& probe, int pointerSize, std::optional<std::size_t> skip) const
+    {
+        std::vector<std::size_t> found;
+        for (std::size_t i = 0; i < Fields.size(); ++i)
+        {
+            if (skip && *skip == i)
+                continue;
+            if (FieldsOverlap(Fields[i], probe, pointerSize))
+                found.push_back(i);
+        }
+        return found;
+    }
+
+    namespace
+    {
+        // Sorts and finds `moved` again by its place in memory: the stable sort keeps the order of equal offsets, so the
+        // marker is the one field that is unique.
+        FieldMove SortAndFind(StructDefinition& definition, std::size_t index, int replaced)
+        {
+            std::vector<std::uint8_t> marks(definition.Fields.size(), 0);
+            marks[index] = 1;
+            std::vector<std::pair<StructField, std::uint8_t>> paired;
+            paired.reserve(definition.Fields.size());
+            for (std::size_t i = 0; i < definition.Fields.size(); ++i)
+                paired.push_back({ std::move(definition.Fields[i]), marks[i] });
+            const auto bit = [](const StructField& field) { return field.Type == Scan::ValueType::Binary ? field.BitStart : 0; };
+            std::stable_sort(paired.begin(), paired.end(), [&](const auto& a, const auto& b)
+                {
+                    return a.first.Offset != b.first.Offset ? a.first.Offset < b.first.Offset : bit(a.first) < bit(b.first);
+                });
+            FieldMove move;
+            move.Replaced = replaced;
+            definition.Fields.clear();
+            for (std::size_t i = 0; i < paired.size(); ++i)
+            {
+                if (paired[i].second)
+                    move.Index = i;
+                definition.Fields.push_back(std::move(paired[i].first));
+            }
+            for (std::size_t i = move.Index; i > 0 && definition.Fields[i - 1].Offset == definition.Fields[move.Index].Offset; --i)
+                ++move.Twin;
+            return move;
+        }
+    }
+
+    FieldMove MoveField(StructDefinition& definition, std::size_t index, int offset, FieldOverlap overlap, int pointerSize)
+    {
+        if (index >= definition.Fields.size())
+            return {};
+        definition.Fields[index].Offset = std::clamp(offset, -kMaxFieldOffset, kMaxFieldOffset);
+        int replaced = 0;
+        if (overlap == FieldOverlap::Replace)
+        {
+            const std::vector<std::size_t> doomed = definition.Overlapping(definition.Fields[index], pointerSize, index);
+            for (auto it = doomed.rbegin(); it != doomed.rend(); ++it)
+            {
+                definition.Fields.erase(definition.Fields.begin() + static_cast<std::ptrdiff_t>(*it));
+                if (*it < index)
+                    --index;
+                ++replaced;
+            }
+        }
+        return SortAndFind(definition, index, replaced);
+    }
+
+    std::optional<FieldPaste> PasteFields(StructDefinition& definition, std::vector<StructField> fields, std::optional<int> at, int pointerSize)
+    {
+        if (fields.empty())
+            return FieldPaste{};
+        std::stable_sort(fields.begin(), fields.end(), [](const StructField& a, const StructField& b) { return a.Offset < b.Offset; });
+        const std::int64_t first = fields.front().Offset;
+        for (StructField& field : fields)
+        {
+            const std::int64_t offset = at ? *at + (field.Offset - first) : field.Offset;
+            if (offset < -kMaxFieldOffset || offset > kMaxFieldOffset)
+                return std::nullopt;
+            field.Offset = static_cast<int>(offset);
+        }
+        FieldPaste result;
+        result.First = fields.front().Offset;
+        result.Added = static_cast<int>(fields.size());
+        const std::size_t before = definition.Fields.size();
+        std::erase_if(definition.Fields, [&](const StructField& existing)
+            {
+                return std::any_of(fields.begin(), fields.end(), [&](const StructField& pasted) { return FieldsOverlap(existing, pasted, pointerSize); });
+            });
+        result.Replaced = static_cast<int>(before - definition.Fields.size());
+        for (StructField& field : fields)
+            definition.Fields.push_back(std::move(field));
+        definition.Sort();
+        return result;
+    }
+
+    void StructureHistory::Record(const std::string& structure, std::vector<StructField> before, std::vector<StructField> after, std::string label, std::string merge,
+        std::uint64_t group)
+    {
+        if (before == after)
+            return;
+        m_redo.clear();
+        if (!merge.empty() && !m_undo.empty() && m_undo.back().Merge == merge && m_undo.back().Structure == structure)
+        {
+            m_undo.back().After = std::move(after);
+            if (m_undo.back().After == m_undo.back().Before)
+                m_undo.pop_back();
+            return;
+        }
+        m_undo.push_back({ structure, std::move(before), std::move(after), std::move(label), std::move(merge), group });
+        if (m_undo.size() > kLimit)
+        {
+            // Drops a whole group from the bottom, so no group is left half undoable.
+            const std::uint64_t oldest = m_undo.front().Group;
+            std::size_t count = 1;
+            while (oldest && count < m_undo.size() && m_undo[count].Group == oldest)
+                ++count;
+            m_undo.erase(m_undo.begin(), m_undo.begin() + static_cast<std::ptrdiff_t>(count));
+        }
+    }
+
+    std::optional<StructureHistory::Result> StructureHistory::Apply(StructureStore& store, std::vector<Step>& from, std::vector<Step>& to, bool undo)
+    {
+        if (from.empty())
+            return std::nullopt;
+        const std::uint64_t group = from.back().Group;
+        Result result{ from.back().Label, from.back().Structure, false };
+        do
+        {
+            Step step = std::move(from.back());
+            from.pop_back();
+            StructDefinition* definition = store.Find(step.Structure);
+            if (!definition)
+            {
+                result.Missing = true;
+                continue;
+            }
+            definition->Fields = undo ? step.Before : step.After;
+            // A merged run ends here: the next edit starts a step of its own.
+            step.Merge.clear();
+            to.push_back(std::move(step));
+        } while (group && !from.empty() && from.back().Group == group);
+        ++store.Generation;
+        return result;
+    }
+
+    std::optional<StructureHistory::Result> StructureHistory::Undo(StructureStore& store)
+    {
+        return Apply(store, m_undo, m_redo, true);
+    }
+
+    std::optional<StructureHistory::Result> StructureHistory::Redo(StructureStore& store)
+    {
+        return Apply(store, m_redo, m_undo, false);
+    }
+
+    void StructureHistory::Renamed(const std::string& from, const std::string& to)
+    {
+        for (std::vector<Step>* steps : { &m_undo, &m_redo })
+        {
+            for (Step& step : *steps)
+            {
+                if (EqualsNoCase(step.Structure, from))
+                    step.Structure = to;
+                for (std::vector<StructField>* fields : { &step.Before, &step.After })
+                {
+                    for (StructField& field : *fields)
+                    {
+                        if (field.ChildStructure == from)
+                            field.ChildStructure = to;
+                    }
+                }
+            }
+        }
+    }
+
+    void StructureHistory::Clear()
+    {
+        m_undo.clear();
+        m_redo.clear();
+    }
+
     StructDefinition* StructureStore::Find(const std::string& name)
     {
         for (const auto& item : Items)
@@ -168,6 +398,11 @@ namespace Manifold::Table
                 return item.get();
         }
         return nullptr;
+    }
+
+    const StructDefinition* StructureStore::Find(const std::string& name) const
+    {
+        return const_cast<StructureStore*>(this)->Find(name);
     }
 
     StructDefinition& StructureStore::Add(std::string name)

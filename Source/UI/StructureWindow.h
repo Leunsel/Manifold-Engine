@@ -2,6 +2,7 @@
 
 #include "App/Commands.h"
 #include "Lua/LuaEngine.h"
+#include "Table/Structures.h"
 #include "UI/AddressActions.h"
 #include "UI/ToolWindowBase.h"
 
@@ -78,6 +79,25 @@ namespace Manifold::UI
             int Offset = 0;
         };
 
+        enum class EditCell
+        {
+            Value,
+            Name,
+            Offset
+        };
+
+        // An offset change that overlaps other fields, waiting for Replace or Keep Both.
+        struct OffsetMove
+        {
+            std::string Structure;
+            std::size_t Index = 0;
+            Table::StructField Field;  // as it was, to see that it is still the same field
+            int Offset = 0;
+            std::string BlockPath;
+            std::string OldKey;
+            std::vector<std::string> Overlapped;
+        };
+
         void Toolbar();
         void MenuBar();
         void ExchangeMenu(const Table::StructDefinition* current);
@@ -101,6 +121,20 @@ namespace Manifold::UI
         void FieldMenu(Table::StructDefinition& definition, Table::StructField& field, const std::vector<std::uint64_t>& addresses, const std::string& path);
         void AddSelectionToAddressList();
         void DeleteSelection();
+        // Records the change as one undo step when it changed any field.
+        template <typename Change>
+        bool EditFields(Table::StructDefinition& definition, const char* label, Change&& change, std::string merge = {}, std::uint64_t group = 0);
+        void CopySelection();
+        void QueuePaste(bool inPlace);
+        void Paste(const std::string& text, const std::string& structure, std::optional<int> at, const std::string& blockPath);
+        void StepHistory(bool undo);
+        void StartOffsetEdit(const std::string& path, const Table::StructField& field);
+        void CommitOffset(Table::StructDefinition& definition, int index, const std::string& blockPath, const std::string& key, int pointerSize);
+        void ApplyOffsetMove(const OffsetMove& move, Table::FieldOverlap overlap);
+        void RemapKey(const std::string& from, const std::string& to);
+        void OffsetPopup();
+        void EditMenu();
+        void RowCommand(Command command);
         Table::StructDefinition& Guess(const std::string& name, std::uint64_t address, int size);
         void Fill(Table::StructDefinition* definition, std::uint64_t address, int size, bool mono);
         void LookupName(std::uint64_t address, bool containing, std::function<void(std::optional<Lua::StructureLookup>)> done);
@@ -158,7 +192,16 @@ namespace Manifold::UI
         int m_scrollToRow = -1;
         double m_copiedAt = -10.0;
         std::string m_selectionStructure;
-        bool m_editName = false;
+        EditCell m_editCell = EditCell::Value;
+        Table::StructureHistory m_history;
+        std::uint64_t m_editGroup = 0;
+        std::optional<OffsetMove> m_offsetMove;
+        bool m_offsetMoveOpen = false;
+        std::string m_scrollToKey;
+        // Edits that rebuild a field list (paste, undo, a moved offset) wait for the start of the next frame: the rows of
+        // this one point into the lists.
+        std::vector<std::function<void()>> m_deferred;
+        std::optional<Command> m_rowCommand;
         std::string m_addOffset;
         std::string m_pendingStructure;
         int m_pendingOffset = 0;

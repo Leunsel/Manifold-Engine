@@ -61,4 +61,14 @@ namespace Manifold::Table
     EncodeCacheStats EncodeTableFileCacheStats();
     void ClearEncodeTableFileCache();
     std::vector<std::unique_ptr<MemoryRecord>> RecordsFromXml(std::string_view text);
+
+    // Structure fields on the clipboard, in Cheat Engine's format: <Elements><Element .../></Elements>.
+    std::string FieldsToXml(const StructureStore& store, std::span<const StructField> fields);
+    struct PastedFields
+    {
+        std::vector<StructField> Fields;
+        // Child structures that came along inside the elements, the innermost first.
+        std::vector<std::unique_ptr<StructDefinition>> Structures;
+    };
+    std::optional<PastedFields> FieldsFromXml(std::string_view text);
 }

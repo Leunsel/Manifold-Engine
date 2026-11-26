@@ -3,7 +3,9 @@
 
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "Lua/LuaEngine.h"
+#include "Table/CheatTable.h"
 #include "Table/ManagedStructures.h"
 #include "Table/RttiStructures.h"
 #include "Table/Structures.h"
@@ -21,6 +23,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -273,6 +276,18 @@ namespace Manifold::UI
         m_title = NextWindowTitle(ICON_FA_SITEMAP "  Structure Dissect", number);
         m_windowId = m_title.substr(m_title.find("###"));
         m_columns.push_back({});
+    }
+
+    template <typename Change>
+    bool StructureWindow::EditFields(Table::StructDefinition& definition, const char* label, Change&& change, std::string merge, std::uint64_t group)
+    {
+        std::vector<Table::StructField> before = definition.Fields;
+        change();
+        if (definition.Fields == before)
+            return false;
+        m_history.Record(definition.Name, std::move(before), definition.Fields, label, std::move(merge), group);
+        m_engine.Table().Touch();
+        return true;
     }
 
     void StructureWindow::Show(std::uint64_t address, const std::string& structure)
@@ -706,40 +721,48 @@ namespace Manifold::UI
             return;
         }
         MenuBar();
+        if (!m_deferred.empty())
+        {
+            std::vector<std::function<void()>> deferred;
+            deferred.swap(m_deferred);
+            for (const auto& edit : deferred)
+                edit();
+        }
         if (!m_pendingStructure.empty())
         {
             if (Table::StructDefinition* target = m_engine.Structures().Find(m_pendingStructure))
             {
                 if (m_pendingInsert)
                 {
-                    Table::StructField added;
-                    added.Offset = m_pendingOffset;
-                    added.Name = "Field " + Hex(static_cast<std::uint64_t>(added.Offset), 4);
-                    target->Fields.push_back(added);
-                    target->Sort();
+                    EditFields(*target, "Insert Field", [&]()
+                        {
+                            Table::StructField added;
+                            added.Offset = m_pendingOffset;
+                            added.Name = "Field " + Hex(static_cast<std::uint64_t>(added.Offset), 4);
+                            target->Fields.push_back(added);
+                            target->Sort();
+                        });
                 }
                 else
                 {
                     const int offset = m_pendingOffset;
-                    target->Fields.erase(std::remove_if(target->Fields.begin(), target->Fields.end(), [&](const Table::StructField& item) { return item.Offset == offset; }),
-                        target->Fields.end());
+                    EditFields(*target, "Delete Field", [&]() { std::erase_if(target->Fields, [&](const Table::StructField& item) { return item.Offset == offset; }); });
                 }
-                m_engine.Table().Touch();
             }
             m_pendingStructure.clear();
         }
         if (!m_pendingDeletes.empty())
         {
+            const std::uint64_t group = ++m_editGroup;
             for (const PendingDelete& pending : m_pendingDeletes)
             {
                 if (Table::StructDefinition* target = m_engine.Structures().Find(pending.Structure))
                 {
                     const int offset = pending.Offset;
-                    target->Fields.erase(std::remove_if(target->Fields.begin(), target->Fields.end(), [&](const Table::StructField& item) { return item.Offset == offset; }), target->Fields.end());
+                    EditFields(*target, "Delete Fields", [&]() { std::erase_if(target->Fields, [&](const Table::StructField& item) { return item.Offset == offset; }); }, {}, group);
                 }
             }
             m_pendingDeletes.clear();
-            m_engine.Table().Touch();
         }
         Toolbar();
         ImGui::SetNextItemWidth(-FLT_MIN);
@@ -845,6 +868,24 @@ namespace Manifold::UI
                     });
             }
             m_selectedFilter = m_filter;
+            if (!m_scrollToKey.empty())
+            {
+                for (std::size_t i = 0; i < m_rows.size(); ++i)
+                {
+                    if (RowKey(m_rows[i]) == m_scrollToKey)
+                    {
+                        m_scrollToRow = static_cast<int>(i);
+                        break;
+                    }
+                }
+                m_scrollToKey.clear();
+            }
+            if (m_rowCommand)
+            {
+                const Command command = *m_rowCommand;
+                m_rowCommand.reset();
+                RowCommand(command);
+            }
             if (!m_filter.empty())
                 Muted(std::to_string(m_rows.size()) + " of " + std::to_string(total) + " fields match" + (addressNote.empty() ? std::string() : "  \xC2\xB7  " + addressNote));
             const int columns = 4 + static_cast<int>(m_columns.size());
@@ -883,9 +924,12 @@ namespace Manifold::UI
             }
             Footer();
         }
+        // Ctrl+V and Ctrl+Z in a text field are the text field's.
+        const bool typing = ImGui::GetIO().WantTextInput || !m_editPath.empty();
         for (const CommandInfo& info : AllCommands())
         {
-            if (info.Scope == CommandScope::Structure && IsWindowCommand(info.Id) && Pressed(info.Id))
+            const bool edit = info.Id == Command::PasteFields || info.Id == Command::PasteFieldsInPlace || info.Id == Command::UndoStructureEdit || info.Id == Command::RedoStructureEdit;
+            if (info.Scope == CommandScope::Structure && IsWindowCommand(info.Id) && Pressed(info.Id) && !(edit && typing))
                 RunCommand(info.Id);
         }
 
@@ -934,6 +978,7 @@ namespace Manifold::UI
             ImGui::EndPopup();
         }
         GotoPopup();
+        OffsetPopup();
         if (m_renameOpen)
         {
             ImGui::OpenPopup("##renamestructure");
@@ -956,6 +1001,7 @@ namespace Manifold::UI
                                 field.ChildStructure = m_renameText;
                         }
                     }
+                    m_history.Renamed(current->Name, m_renameText);
                     current->Name = m_renameText;
                     m_structure = m_renameText;
                     m_engine.Table().Touch();
@@ -970,7 +1016,8 @@ namespace Manifold::UI
     bool StructureWindow::IsWindowCommand(Command command)
     {
         return command == Command::DefineStructure || command == Command::AddStructureColumn || command == Command::CollapseStructure || command == Command::StructureGotoAddress ||
-               command == Command::ImportStructures || command == Command::ExportStructures;
+               command == Command::ImportStructures || command == Command::ExportStructures || command == Command::PasteFields || command == Command::PasteFieldsInPlace ||
+               command == Command::UndoStructureEdit || command == Command::RedoStructureEdit;
     }
 
     void StructureWindow::RunCommand(Command command)
@@ -989,6 +1036,10 @@ namespace Manifold::UI
             if (const Table::StructDefinition* current = Current())
                 ExportStructuresToFile(m_workspace, { current->Name }, StructFormat::Cpp, true);
             break;
+        case Command::PasteFields: QueuePaste(false); break;
+        case Command::PasteFieldsInPlace: QueuePaste(true); break;
+        case Command::UndoStructureEdit: m_deferred.push_back([this]() { StepHistory(true); }); break;
+        case Command::RedoStructureEdit: m_deferred.push_back([this]() { StepHistory(false); }); break;
         default: break;
         }
     }
@@ -1099,6 +1150,7 @@ namespace Manifold::UI
                 m_open = false;
             ImGui::EndMenu();
         }
+        EditMenu();
         if (ImGui::BeginMenu("Structures"))
         {
             item(ICON_FA_MAGIC "  Define a New Structure...", Command::DefineStructure);
@@ -1210,7 +1262,7 @@ namespace Manifold::UI
 
     void StructureWindow::FieldShortcuts(int pointerSize)
     {
-        if (!m_editPath.empty())
+        if (!m_editPath.empty() || ImGui::GetIO().WantTextInput)
             return;
         Table::StructDefinition* definition = nullptr;
         Table::StructField* field = nullptr;
@@ -1243,7 +1295,7 @@ namespace Manifold::UI
             if (readable)
             {
                 m_editPath = path;
-                m_editName = false;
+                m_editCell = EditCell::Value;
                 m_editText.clear();
                 std::vector<std::uint8_t> bytes(static_cast<std::size_t>(FieldWidth(field, pointerSize)));
                 if (m_engine.Process()->ReadExact(address, bytes.data(), bytes.size()))
@@ -1252,9 +1304,11 @@ namespace Manifold::UI
             break;
         case Command::RenameField:
             m_editPath = path;
-            m_editName = true;
+            m_editCell = EditCell::Name;
             m_editText = field.Name;
             break;
+        case Command::ChangeFieldOffset: StartOffsetEdit(path, field); break;
+        case Command::CopyFields: CopySelection(); break;
         case Command::InsertField:
             m_pendingStructure = definition.Name;
             m_pendingOffset = field.Offset + FieldWidth(field, pointerSize);
@@ -1402,11 +1456,14 @@ namespace Manifold::UI
         if (IconButton(ICON_FA_PLUS "##addfield", "Add a field at that offset, or at the end of the structure when it is blank") && current)
         {
             Table::StructField field;
-            field.Offset = static_cast<int>(ParseHex(m_addOffset).value_or(static_cast<std::uint64_t>(current->Size())));
+            field.Offset = Table::ParseFieldOffset(m_addOffset).value_or(current->Size());
             field.Name = "Field " + Hex(static_cast<std::uint64_t>(field.Offset), 4);
-            current->Fields.push_back(field);
-            current->Sort();
-            m_engine.Table().Touch();
+            // Like Insert Field: a field added this frame waits for the next one, the rows point into the list.
+            m_deferred.push_back([this, name = current->Name, field]()
+                {
+                    if (Table::StructDefinition* target = m_engine.Structures().Find(name))
+                        EditFields(*target, "Add Field", [&]() { target->Fields.push_back(field); target->Sort(); });
+                });
         }
         ImGui::EndDisabled();
         ImGui::SameLine();
@@ -1476,15 +1533,18 @@ namespace Manifold::UI
             Muted("Loading more fields...");
             return;
         }
-        if (ImGui::SmallButton("Load More##unrealMoreFields"))
+        bool load = false;
+        {
+            Layout::Row line("##unrealMoreFields", { Layout::Size::Fit(), Layout::Size::Fill() });
+            line.Cell([&]() { load = Layout::Button("Load More##loadMore"); });
+            line.Cell([&]() { Layout::Muted(Grouped(static_cast<std::uint64_t>(more->second.Limit)) + " fields shown, the class has more"); });
+        }
+        if (load)
         {
             const std::uint64_t address = more->second.Address;
             more->second.Limit += Table::kUnrealFieldLimit;
             Fill(&definition, address, definition.Size(), false);
-            return;
         }
-        ImGui::SameLine();
-        Muted(Grouped(static_cast<std::uint64_t>(more->second.Limit)) + " fields shown, the class has more");
     }
 
     void StructureWindow::BuildRows(Table::StructDefinition& definition, std::vector<std::uint64_t> bases, const std::string& path, int depth, int parentBlock, int parentField,
@@ -1904,10 +1964,30 @@ namespace Manifold::UI
             ImGui::SameLine(0.0f, Px(4.0f));
         }
         PushMono();
-        const std::string offsetText = Hex(static_cast<std::uint64_t>(field.Offset), 4) +
+        // A negative offset (counting back from the address) shows as -0008, not as FFFFFFFFFFFFFFF8.
+        const std::string offsetText = (field.Offset < 0 ? Table::FieldOffsetText(field.Offset) : Hex(static_cast<std::uint64_t>(field.Offset), 4)) +
             (field.Type == Scan::ValueType::Binary && field.CustomType.empty() ? ":" + std::to_string(field.BitStart) : std::string());
         const bool selected = m_selected.count(fieldPath) > 0;
-        const bool clicked = ImGui::Selectable(offsetText.c_str(), selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick | ImGuiSelectableFlags_AllowOverlap);
+        bool clicked = false;
+        // The editor in a cell: as wide as the cell, with the keyboard in it.
+        const auto cellEditor = [this](const char* id)
+            {
+                ImGui::SetNextItemWidth(-FLT_MIN);
+                ImGui::SetKeyboardFocusHere();
+                return InputText(id, m_editText, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+            };
+        if (m_editPath == fieldPath && m_editCell == EditCell::Offset)
+        {
+            if (cellEditor("##offset"))
+                CommitOffset(definition, row.Field, block.Path, fieldPath, pointerSize);
+            ItemTooltip("The new offset in hex, + or - in front allowed. Enter moves the field, Escape keeps it.");
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+                m_editPath.clear();
+        }
+        else
+        {
+            clicked = ImGui::Selectable(offsetText.c_str(), selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick | ImGuiSelectableFlags_AllowOverlap);
+        }
         const ImGuiIO& io = ImGui::GetIO();
         if (clicked)
         {
@@ -1979,12 +2059,16 @@ namespace Manifold::UI
                 if (!addresses.empty() && addresses.front())
                     m_workspace.OpenMemoryViewer(addresses.front(), true);
             }
+            else if (column == 0)
+            {
+                StartOffsetEdit(fieldPath, field);
+            }
             else
             {
                 m_editPath = fieldPath;
-                m_editName = column == 2;
-                m_editText = m_editName ? field.Name : "";
-                if (!m_editName && !addresses.empty() && addresses.front() && m_engine.HasProcess())
+                m_editCell = column == 2 ? EditCell::Name : EditCell::Value;
+                m_editText = m_editCell == EditCell::Name ? field.Name : "";
+                if (m_editCell == EditCell::Value && !addresses.empty() && addresses.front() && m_engine.HasProcess())
                 {
                     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(FieldWidth(field, pointerSize)));
                     if (m_engine.Process()->ReadExact(addresses.front(), bytes.data(), bytes.size()))
@@ -2028,15 +2112,12 @@ namespace Manifold::UI
         }
 
         ImGui::TableNextColumn();
-        if (m_editPath == fieldPath && m_editName)
+        if (m_editPath == fieldPath && m_editCell == EditCell::Name)
         {
-            ImGui::SetNextItemWidth(-1.0f);
-            ImGui::SetKeyboardFocusHere();
-            if (InputText("##name", m_editText, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll))
+            if (cellEditor("##name"))
             {
-                field.Name = m_editText;
+                EditFields(definition, "Rename Field", [&]() { field.Name = m_editText; });
                 m_editPath.clear();
-                m_engine.Table().Touch();
             }
             if (ImGui::IsKeyPressed(ImGuiKey_Escape))
                 m_editPath.clear();
@@ -2058,11 +2139,9 @@ namespace Manifold::UI
                 Muted("??");
                 continue;
             }
-            if (column == 0 && m_editPath == fieldPath && !m_editName)
+            if (column == 0 && m_editPath == fieldPath && m_editCell == EditCell::Value)
             {
-                ImGui::SetNextItemWidth(-1.0f);
-                ImGui::SetKeyboardFocusHere();
-                const bool entered = InputText("##value", m_editText, ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+                const bool entered = cellEditor("##value");
                 if (entered && ShowsBits(field))
                 {
                     m_workspace.Report(WriteBits(field, address, m_editText));
@@ -2111,6 +2190,321 @@ namespace Manifold::UI
         ImGui::PopID();
     }
 
+    namespace
+    {
+        std::string FieldCount(std::size_t count)
+        {
+            return std::to_string(count) + (count == 1 ? " field" : " fields");
+        }
+
+        bool ClipboardHasFields()
+        {
+            const char* clipboard = ImGui::GetClipboardText();
+            return clipboard && std::string_view(clipboard).find("<Element") != std::string_view::npos;
+        }
+    }
+
+    void StructureWindow::EditMenu()
+    {
+        if (!ImGui::BeginMenu("Edit"))
+            return;
+        const std::string undo = m_history.CanUndo() ? ICON_FA_UNDO "  Undo " + m_history.UndoLabel() : std::string(ICON_FA_UNDO "  Undo");
+        if (CommandItem(undo.c_str(), Command::UndoStructureEdit, false, m_history.CanUndo()))
+            RunCommand(Command::UndoStructureEdit);
+        const std::string redo = m_history.CanRedo() ? ICON_FA_REDO "  Redo " + m_history.RedoLabel() : std::string(ICON_FA_REDO "  Redo");
+        if (CommandItem(redo.c_str(), Command::RedoStructureEdit, false, m_history.CanRedo()))
+            RunCommand(Command::RedoStructureEdit);
+        ItemTooltip("Field edits in this window: offsets, names, types, pasted, inserted and deleted fields.");
+        ImGui::Separator();
+        // ∑ The menu bar is drawn before this frame's rows are built, and last frame's may point into a field list a
+        //   finished fill has replaced since; what needs the rows runs once they are built (RowCommand).
+        const bool selected = !m_selectAnchor.empty() && Current() != nullptr;
+        if (CommandItem(ICON_FA_COPY "  Copy Fields", Command::CopyFields, false, selected))
+            m_rowCommand = Command::CopyFields;
+        ItemTooltip("The selected fields, as text Cheat Engine's structure dissect pastes too.");
+        const bool pasteable = ClipboardHasFields() && Current() != nullptr;
+        if (CommandItem(ICON_FA_PASTE "  Paste Fields", Command::PasteFields, false, pasteable))
+            m_rowCommand = Command::PasteFields;
+        ItemTooltip("The first copied field lands at the selected one, the others keep their distances to it; fields in the way are replaced.");
+        if (CommandItem(ICON_FA_PASTE "  Paste Fields at Their Offsets", Command::PasteFieldsInPlace, false, pasteable))
+            m_rowCommand = Command::PasteFieldsInPlace;
+        ItemTooltip("Every field at the offset it had where it was copied.");
+        ImGui::Separator();
+        if (CommandItem(ICON_FA_ARROWS_ALT_V "  Change the Offset", Command::ChangeFieldOffset, false, selected))
+            m_rowCommand = Command::ChangeFieldOffset;
+        ImGui::EndMenu();
+    }
+
+    void StructureWindow::RowCommand(Command command)
+    {
+        switch (command)
+        {
+        case Command::CopyFields: CopySelection(); break;
+        case Command::PasteFields: QueuePaste(false); break;
+        case Command::PasteFieldsInPlace: QueuePaste(true); break;
+        case Command::ChangeFieldOffset:
+            if (const int anchor = AnchorRow(); anchor >= 0)
+            {
+                const Row& row = m_rows[static_cast<std::size_t>(anchor)];
+                StartOffsetEdit(m_selectAnchor, row.Definition->Fields[static_cast<std::size_t>(row.Field)]);
+                m_scrollToRow = anchor;
+            }
+            break;
+        default: break;
+        }
+    }
+
+    void StructureWindow::CopySelection()
+    {
+        const int anchor = AnchorRow();
+        if (anchor < 0)
+            return;
+        const Row& anchorRow = m_rows[static_cast<std::size_t>(anchor)];
+        std::vector<Table::StructField> fields;
+        bool elsewhere = false;
+        for (const Row& row : m_rows)
+        {
+            if (!m_selected.count(RowKey(row)))
+                continue;
+            if (row.Block != anchorRow.Block)
+            {
+                elsewhere = true;
+                continue;
+            }
+            fields.push_back(row.Definition->Fields[static_cast<std::size_t>(row.Field)]);
+        }
+        if (fields.empty())
+            fields.push_back(anchorRow.Definition->Fields[static_cast<std::size_t>(anchorRow.Field)]);
+        ImGui::SetClipboardText(Table::FieldsToXml(m_engine.Structures(), fields).c_str());
+        // ∑ Distances only mean something inside one structure: fields selected in another one (under an opened
+        //   pointer) stay behind, and the message says so instead of pasting a mix.
+        if (elsewhere)
+            m_engine.Notify(LogLevel::Info, "Copied " + FieldCount(fields.size()) + " of " + anchorRow.Definition->Name + "; the fields selected in other structures were left out.");
+    }
+
+    void StructureWindow::QueuePaste(bool inPlace)
+    {
+        const char* clipboard = ImGui::GetClipboardText();
+        std::string text = clipboard ? clipboard : "";
+        std::string structure;
+        std::optional<int> at;
+        std::string blockPath;
+        if (const int anchor = AnchorRow(); anchor >= 0)
+        {
+            const Row& row = m_rows[static_cast<std::size_t>(anchor)];
+            structure = row.Definition->Name;
+            at = row.Definition->Fields[static_cast<std::size_t>(row.Field)].Offset;
+            blockPath = m_blocks[static_cast<std::size_t>(row.Block)].Path;
+        }
+        else if (const Table::StructDefinition* current = Current())
+        {
+            structure = current->Name;
+            at = current->Size();
+        }
+        if (inPlace)
+            at.reset();
+        m_deferred.push_back([this, text = std::move(text), structure = std::move(structure), at, blockPath = std::move(blockPath)]() { Paste(text, structure, at, blockPath); });
+    }
+
+    void StructureWindow::Paste(const std::string& text, const std::string& structure, std::optional<int> at, const std::string& blockPath)
+    {
+        std::optional<Table::PastedFields> pasted = Table::FieldsFromXml(text);
+        if (!pasted)
+        {
+            m_engine.Notify(LogLevel::Warning, "The clipboard holds no structure fields. Copy some in a Structure Dissect first, here or in Cheat Engine.");
+            return;
+        }
+        Table::StructureStore& store = m_engine.Structures();
+        Table::StructDefinition* definition = structure.empty() ? nullptr : store.Find(structure);
+        if (!definition)
+        {
+            m_engine.Notify(LogLevel::Warning, "Pick or define a structure to paste the fields into.");
+            return;
+        }
+        const int pointerSize = m_engine.HasProcess() ? m_engine.Process()->PointerSize() : 8;
+        std::optional<Table::FieldPaste> result;
+        EditFields(*definition, "Paste Fields", [&]() { result = Table::PasteFields(*definition, pasted->Fields, at, pointerSize); });
+        if (!result)
+        {
+            m_engine.Notify(LogLevel::Warning, "Pasted there, fields would lie beyond " + Table::FieldOffsetText(Table::kMaxFieldOffset) + "; nothing was pasted.");
+            return;
+        }
+        // Child structures that came along and are not in this table yet, so the pasted fields still point somewhere.
+        int created = 0;
+        for (auto& child : pasted->Structures)
+        {
+            if (store.Find(child->Name))
+                continue;
+            store.Add(child->Name).Fields = std::move(child->Fields);
+            ++created;
+        }
+
+        std::set<int> offsets;
+        int first = std::numeric_limits<int>::max();
+        for (const Table::StructField& field : pasted->Fields)
+            first = std::min(first, field.Offset);
+        for (const Table::StructField& field : pasted->Fields)
+            offsets.insert(at ? *at + (field.Offset - first) : field.Offset);
+        m_selected.clear();
+        std::string firstKey;
+        int twin = 0;
+        for (std::size_t i = 0; i < definition->Fields.size(); ++i)
+        {
+            const Table::StructField& field = definition->Fields[i];
+            twin = i > 0 && definition->Fields[i - 1].Offset == field.Offset ? twin + 1 : 0;
+            if (!offsets.count(field.Offset))
+                continue;
+            const std::string key = FieldKey(blockPath, field.Offset, twin);
+            if (firstKey.empty())
+                firstKey = key;
+            m_selected.insert(key);
+        }
+        m_selectAnchor = firstKey;
+        m_rangeAnchor = firstKey;
+        m_scrollToKey = firstKey;
+        if (result->Replaced || created)
+        {
+            std::string message = "Pasted " + FieldCount(static_cast<std::size_t>(result->Added)) + " at " + Table::FieldOffsetText(result->First) + " into " + definition->Name;
+            if (result->Replaced)
+                message += ", in place of " + FieldCount(static_cast<std::size_t>(result->Replaced));
+            if (created)
+                message += ", with " + std::to_string(created) + (created == 1 ? " child structure" : " child structures");
+            m_engine.Notify(LogLevel::Info, message + ". " + ShortcutLabel(Command::UndoStructureEdit) + " undoes it.");
+        }
+    }
+
+    void StructureWindow::StepHistory(bool undo)
+    {
+        const std::optional<Table::StructureHistory::Result> result = undo ? m_history.Undo(m_engine.Structures()) : m_history.Redo(m_engine.Structures());
+        if (!result)
+            return;
+        m_editPath.clear();
+        m_engine.Table().Touch();
+        if (result->Missing)
+            m_engine.Notify(LogLevel::Warning, "The structure \"" + result->Structure + "\" is gone, so \"" + result->Label + "\" could not be " + (undo ? "undone." : "redone."));
+    }
+
+    void StructureWindow::StartOffsetEdit(const std::string& path, const Table::StructField& field)
+    {
+        m_editPath = path;
+        m_editCell = EditCell::Offset;
+        m_editText = field.Offset < 0 ? "-" + Hex(static_cast<std::uint64_t>(-static_cast<std::int64_t>(field.Offset))) : Hex(static_cast<std::uint64_t>(field.Offset));
+    }
+
+    void StructureWindow::CommitOffset(Table::StructDefinition& definition, int index, const std::string& blockPath, const std::string& key, int pointerSize)
+    {
+        const std::optional<int> offset = Table::ParseFieldOffset(m_editText);
+        if (!offset)
+        {
+            // The field stays open for another try.
+            m_engine.Notify(LogLevel::Warning, "\"" + Trim(m_editText) + "\" is no offset: hex digits, up to " + Hex(static_cast<std::uint64_t>(Table::kMaxFieldOffset)) +
+                ", with + or - in front if you like.");
+            return;
+        }
+        m_editPath.clear();
+        const Table::StructField& field = definition.Fields[static_cast<std::size_t>(index)];
+        if (*offset == field.Offset)
+            return;
+        OffsetMove move{ definition.Name, static_cast<std::size_t>(index), field, *offset, blockPath, key, {} };
+        Table::StructField probe = field;
+        probe.Offset = *offset;
+        const std::vector<std::size_t> overlapped = definition.Overlapping(probe, pointerSize, move.Index);
+        if (overlapped.empty())
+        {
+            m_deferred.push_back([this, move]() { ApplyOffsetMove(move, Table::FieldOverlap::Keep); });
+            return;
+        }
+        for (const std::size_t other : overlapped)
+            move.Overlapped.push_back(Table::FieldOffsetText(definition.Fields[other].Offset) + "  " + definition.Fields[other].Name + "  (" + TypeLabel(definition.Fields[other]) + ")");
+        m_offsetMove = std::move(move);
+        m_offsetMoveOpen = true;
+    }
+
+    void StructureWindow::ApplyOffsetMove(const OffsetMove& move, Table::FieldOverlap overlap)
+    {
+        Table::StructDefinition* definition = m_engine.Structures().Find(move.Structure);
+        if (!definition || move.Index >= definition->Fields.size() || definition->Fields[move.Index] != move.Field)
+        {
+            m_engine.Notify(LogLevel::Warning, "The field " + move.Field.Name + " changed in the meantime; its offset stays as it is.");
+            return;
+        }
+        const int pointerSize = m_engine.HasProcess() ? m_engine.Process()->PointerSize() : 8;
+        Table::FieldMove moved;
+        EditFields(*definition, "Change Offset", [&]() { moved = Table::MoveField(*definition, move.Index, move.Offset, overlap, pointerSize); });
+        const std::string key = FieldKey(move.BlockPath, move.Offset, moved.Twin);
+        RemapKey(move.OldKey, key);
+        m_selected = { key };
+        m_selectAnchor = key;
+        m_rangeAnchor = key;
+        m_scrollToKey = key;
+        if (moved.Replaced > 0)
+            m_engine.Notify(LogLevel::Info, move.Field.Name + " is at " + Table::FieldOffsetText(move.Offset) + " now, in place of " + FieldCount(static_cast<std::size_t>(moved.Replaced)) +
+                ". " + ShortcutLabel(Command::UndoStructureEdit) + " puts them back.");
+    }
+
+    void StructureWindow::RemapKey(const std::string& from, const std::string& to)
+    {
+        // An opened pointer stays open when it moves, and so do the ones opened below it.
+        std::set<std::string> expanded;
+        for (const std::string& key : m_expanded)
+        {
+            if (key == from)
+                expanded.insert(to);
+            else if (key.size() > from.size() && key.compare(0, from.size(), from) == 0 && key[from.size()] == '/')
+                expanded.insert(to + key.substr(from.size()));
+            else
+                expanded.insert(key);
+        }
+        m_expanded.swap(expanded);
+    }
+
+    void StructureWindow::OffsetPopup()
+    {
+        if (m_offsetMoveOpen)
+        {
+            ImGui::OpenPopup("##offsetoverlap");
+            m_offsetMoveOpen = false;
+        }
+        if (!ImGui::BeginPopup("##offsetoverlap"))
+        {
+            m_offsetMove.reset();
+            return;
+        }
+        if (!m_offsetMove)
+        {
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+            return;
+        }
+        const OffsetMove move = *m_offsetMove;
+        Layout::Colored(ICON_FA_EXCLAMATION_TRIANGLE "  At " + Table::FieldOffsetText(move.Offset) + ", " + move.Field.Name + " overlaps " + FieldCount(move.Overlapped.size()) + ":",
+            ManifoldTheme::Warning, Layout::Overflow::Visible);
+        constexpr std::size_t kShown = 8;
+        for (std::size_t i = 0; i < move.Overlapped.size() && i < kShown; ++i)
+            Layout::Text("    \xE2\x80\xA2  " + move.Overlapped[i], { .Mode = Layout::Overflow::Visible });
+        if (move.Overlapped.size() > kShown)
+            Layout::Muted("    and " + std::to_string(move.Overlapped.size() - kShown) + " more", Layout::Overflow::Visible);
+        Layout::Muted("Replace removes them; Keep Both lets the fields overlap like a union. " + ShortcutLabel(Command::UndoStructureEdit) + " undoes either.",
+            Layout::Overflow::Visible);
+        std::optional<std::optional<Table::FieldOverlap>> chosen;
+        {
+            Layout::Row buttons("##offsetchoice", { Layout::Size::Fit(), Layout::Size::Fit(), Layout::Size::Fit() });
+            buttons.Cell([&]() { if (Layout::Button("Replace", Layout::ButtonKind::Accent)) chosen = Table::FieldOverlap::Replace; });
+            buttons.Cell([&]() { if (Layout::Button("Keep Both")) chosen = Table::FieldOverlap::Keep; });
+            buttons.Cell([&]() { if (Layout::Button("Cancel")) chosen = std::optional<Table::FieldOverlap>(); });
+        }
+        if (!chosen && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+            chosen = std::optional<Table::FieldOverlap>();
+        if (chosen)
+        {
+            if (*chosen)
+                m_deferred.push_back([this, move, choice = **chosen]() { ApplyOffsetMove(move, choice); });
+            m_offsetMove.reset();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
     void StructureWindow::FieldMenu(Table::StructDefinition& definition, Table::StructField& field, const std::vector<std::uint64_t>& addresses, const std::string& path)
     {
         const int pointerSize = m_engine.HasProcess() ? m_engine.Process()->PointerSize() : 8;
@@ -2128,8 +2522,25 @@ namespace Manifold::UI
         ImGui::Separator();
         item(ICON_FA_EDIT "  Change the Value", Command::ChangeFieldValue, first != 0 && m_engine.HasProcess());
         item(ICON_FA_I_CURSOR "  Rename", Command::RenameField);
+        item(ICON_FA_ARROWS_ALT_V "  Change the Offset", Command::ChangeFieldOffset, !multi);
         if (ImGui::MenuItem(ICON_FA_COPY "  Copy the Address", nullptr, false, first != 0))
             ImGui::SetClipboardText(Hex(first).c_str());
+        ImGui::Separator();
+        const std::string copyLabel = multi ? ICON_FA_COPY "  Copy " + std::to_string(m_selected.size()) + " Fields" : std::string(ICON_FA_COPY "  Copy Field");
+        item(copyLabel.c_str(), Command::CopyFields);
+        const char* clipboard = ImGui::GetClipboardText();
+        const bool pasteable = clipboard && std::string_view(clipboard).find("<Element") != std::string_view::npos;
+        // The field under the menu is where the paste goes, also when another one was selected last.
+        if (CommandItem(ICON_FA_PASTE "  Paste Fields Here", Command::PasteFields, false, pasteable))
+        {
+            m_selectAnchor = path;
+            QueuePaste(false);
+        }
+        if (CommandItem(ICON_FA_PASTE "  Paste Fields at Their Offsets", Command::PasteFieldsInPlace, false, pasteable))
+        {
+            m_selectAnchor = path;
+            QueuePaste(true);
+        }
         ImGui::Separator();
         if (ImGui::BeginMenu(ICON_FA_EXCHANGE_ALT "  Type"))
         {
@@ -2184,17 +2595,20 @@ namespace Manifold::UI
             {
                 if (const Lua::CustomType* custom = m_engine.Lua().FindCustomType(picked->Choice.Custom))
                 {
-                    if (Embedded(field))
-                        field.ChildStructure.clear();
-                    field.CustomType = custom->Name;
-                    field.Type = Scan::ValueType::ByteArray;
-                    field.Size = custom->ByteCount();
-                    m_engine.Table().Touch();
+                    EditFields(definition, "Change Type", [&]()
+                        {
+                            if (Embedded(field))
+                                field.ChildStructure.clear();
+                            field.CustomType = custom->Name;
+                            field.Type = Scan::ValueType::ByteArray;
+                            field.Size = custom->ByteCount();
+                        });
                 }
             }
             else if (picked)
             {
                 const Scan::ValueType type = picked->Choice.Type;
+                std::vector<Table::StructField> before = definition.Fields;
                 if (Embedded(field))
                     field.ChildStructure.clear();
                 field.CustomType.clear();
@@ -2213,16 +2627,23 @@ namespace Manifold::UI
                 {
                     field.Display = Table::FieldDisplay::Unsigned;
                 }
-                m_engine.Table().Touch();
+                if (definition.Fields != before)
+                {
+                    m_history.Record(definition.Name, std::move(before), definition.Fields, "Change Type");
+                    m_engine.Table().Touch();
+                }
             }
             if (field.CustomType.empty() && (field.Type == Scan::ValueType::String || field.Type == Scan::ValueType::ByteArray))
             {
                 ImGui::Separator();
                 ImGui::SetNextItemWidth(Px(80.0f));
-                if (ImGui::InputInt("Length", &field.Size))
-                    field.Size = std::clamp(field.Size, 1, Table::kMaxFieldBytes);
-                if (field.Type == Scan::ValueType::String)
-                    ImGui::MenuItem("UTF-16", nullptr, &field.Unicode);
+                int length = field.Size;
+                // Typed digit by digit, the length is one undo step per field.
+                if (ImGui::InputInt("Length", &length))
+                    EditFields(definition, "Change Length", [&]() { field.Size = std::clamp(length, 1, Table::kMaxFieldBytes); }, "length " + path);
+                bool unicode = field.Unicode;
+                if (field.Type == Scan::ValueType::String && ImGui::MenuItem("UTF-16", nullptr, &unicode))
+                    EditFields(definition, "Change Type", [&]() { field.Unicode = unicode; });
             }
             if (field.CustomType.empty() && field.Type == Scan::ValueType::Binary)
             {
@@ -2235,10 +2656,12 @@ namespace Manifold::UI
                 const bool lengthChanged = ImGui::InputInt("Bit count", &length);
                 if (startChanged || lengthChanged)
                 {
-                    field.BitStart = std::clamp(start, 0, 63);
-                    field.BitLength = std::clamp(length, 1, 64 - field.BitStart);
-                    field.Size = Table::BitFieldSize(field.BitStart, field.BitLength);
-                    m_engine.Table().Touch();
+                    EditFields(definition, "Change Bits", [&]()
+                        {
+                            field.BitStart = std::clamp(start, 0, 63);
+                            field.BitLength = std::clamp(length, 1, 64 - field.BitStart);
+                            field.Size = Table::BitFieldSize(field.BitStart, field.BitLength);
+                        }, "bits " + path);
                 }
             }
             ImGui::EndMenu();
@@ -2248,10 +2671,7 @@ namespace Manifold::UI
             const auto show = [&](const char* label, Table::FieldDisplay display)
                 {
                     if (ImGui::MenuItem(label, nullptr, field.Display == display) && field.Display != display)
-                    {
-                        field.Display = display;
-                        m_engine.Table().Touch();
-                    }
+                        EditFields(definition, "Show As", [&]() { field.Display = display; });
                 };
             show("Unsigned", Table::FieldDisplay::Unsigned);
             show("Signed", Table::FieldDisplay::Signed);
@@ -2265,7 +2685,7 @@ namespace Manifold::UI
             for (const auto& item : m_engine.Structures().Items)
             {
                 if (ImGui::MenuItem(item->Name.c_str(), nullptr, item->Name == field.ChildStructure))
-                    field.ChildStructure = item->Name;
+                    EditFields(definition, "Points to Structure", [&]() { field.ChildStructure = item->Name; });
             }
             ImGui::EndMenu();
         }

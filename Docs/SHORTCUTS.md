@@ -197,7 +197,7 @@ While the hex view pane has the focus. The keys act on the selected byte.
 
 ## Structure Dissect
 
-While a Structure Dissect window has the focus. Field keys act on the selected field. The arrow keys, Page Up, Page Down, Home and End move through the fields (Shift extends the selection); Right opens a pointer or an embedded structure and then steps into it, Left closes it and then steps out.
+While a Structure Dissect window has the focus. Field keys act on the selected field; Copy Fields takes the selected fields, Paste Fields puts them at the selected field with their distances kept. The arrow keys, Page Up, Page Down, Home and End move through the fields (Shift extends the selection); Right opens a pointer or an embedded structure and then steps into it, Left closes it and then steps out.
 
 | Keys | Command | Name in the settings | Origin |
 |---|---|---|---|
@@ -216,6 +216,12 @@ While a Structure Dissect window has the focus. Field keys act on the selected f
 | `F` | Browse Pointer Target | `BrowseFieldPointer` | CE |
 | `F5` | Find Out What Accesses This Field | `FieldAccesses` | Manifold |
 | `F6` | Find Out What Writes to This Field | `FieldWrites` | Manifold |
+| `Shift+Enter` | Change Field Offset | `ChangeFieldOffset` | Manifold |
+| `Ctrl+C` | Copy Fields | `CopyFields` | CE |
+| `Ctrl+V` | Paste Fields | `PasteFields` | CE |
+| `Ctrl+Shift+V` | Paste Fields at Their Offsets | `PasteFieldsInPlace` | Manifold |
+| `Ctrl+Z` | Undo Structure Edit | `UndoStructureEdit` | Manifold |
+| `Ctrl+Y` or `Ctrl+Shift+Z` | Redo Structure Edit | `RedoStructureEdit` | Manifold |
 
 ## Auto Assembler and Script Editor
 

@@ -195,6 +195,12 @@ namespace Manifold
         BrowseFieldPointer,
         FieldAccesses,
         FieldWrites,
+        ChangeFieldOffset,
+        CopyFields,
+        PasteFields,
+        PasteFieldsInPlace,
+        UndoStructureEdit,
+        RedoStructureEdit,
 
         ScriptNewWindow,
         ScriptOpen,
