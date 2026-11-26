@@ -306,6 +306,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\RecordDebugTests.cpp" />
     <ClCompile Include="..\Tests\RelayTests.cpp" />
     <ClCompile Include="..\Tests\RttiTests.cpp" />
+    <ClCompile Include="..\Tests\ScanBufferTests.cpp" />
     <ClCompile Include="..\Tests\ScanStoreTests.cpp" />
     <ClCompile Include="..\Tests\SignatureTests.cpp" />
     <ClCompile Include="..\Tests\SpeedhackTests.cpp" />

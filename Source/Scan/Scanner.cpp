@@ -1444,7 +1444,10 @@ namespace Manifold::Scan
                     SetThreadName(L"Scan worker");
                     PreferFastCores();
                     ScanStore& file = *result->Files[static_cast<std::size_t>(index)];
-                    std::vector<std::uint8_t> buffer(kChunkBytes + kGroupMaxBytes + 64);
+                    // ∑ A chunk reads valueSize - 1 bytes past its end to catch a value across the boundary. String and
+                    //   byte-array values have no length limit, so a fixed kGroupMaxBytes margin let a long one write
+                    //   past the buffer.
+                    std::vector<std::uint8_t> buffer(kChunkBytes + std::max<std::size_t>(static_cast<std::size_t>(valueSize), kGroupMaxBytes) + 64);
                     std::vector<std::uint8_t> record(8 + tagBytes + 2 * static_cast<std::size_t>(valueSize));
                     std::vector<Segment> localSegments;
                     std::vector<Snapshot> localSnapshots;
@@ -1456,7 +1459,7 @@ namespace Manifold::Scan
                             break;
                         const WorkChunk& chunk = chunks[item];
                         const std::size_t readSize = static_cast<std::size_t>(chunk.ReadEnd - chunk.Base);
-                        if (process->Read(chunk.Base, buffer.data(), readSize) == 0)
+                        if (readSize > buffer.size() || process->Read(chunk.Base, buffer.data(), readSize) == 0)
                         {
                             m_done += chunk.Size;
                             continue;
@@ -1540,7 +1543,8 @@ namespace Manifold::Scan
                     const std::size_t previousTag = previous->TagBytes();
                     std::vector<std::uint8_t> record(8 + tagBytes + 2 * static_cast<std::size_t>(valueSize));
                     std::vector<std::uint8_t> input;
-                    std::vector<std::uint8_t> window(kWindowBytes + kGroupMaxBytes + 64);
+                    const std::size_t windowRead = std::max<std::size_t>(kWindowBytes, static_cast<std::size_t>(valueSize));
+                    std::vector<std::uint8_t> window(windowRead + kGroupMaxBytes + 64);
                     std::vector<std::uint8_t> current;
                     std::vector<Segment> localSegments;
                     std::optional<SavedLookup> lookup;
@@ -1644,7 +1648,7 @@ namespace Manifold::Scan
                                     if (address < windowBase || address + static_cast<std::uint64_t>(valueSize) > windowBase + windowSize)
                                     {
                                         windowBase = address;
-                                        windowSize = process->Read(address, window.data(), std::max<std::size_t>(kWindowBytes, static_cast<std::size_t>(valueSize)));
+                                        windowSize = process->Read(address, window.data(), windowRead);
                                         if (windowSize < static_cast<std::size_t>(valueSize))
                                         {
                                             windowBase = 0;
@@ -2176,7 +2180,10 @@ namespace Manifold::Scan
             {
                 SetThreadName(L"Scan worker");
                 PreferFastCores();
-                std::vector<std::uint8_t> buffer(kChunkBytes + 256);
+                // ∑ Each chunk reads size - 1 bytes past its end so a match across the boundary is found, so the
+                //   longest read is kChunkBytes + size - 1. A fixed + 256 let any pattern over 257 bytes (Byte Search,
+                //   aobscan, a raised SignatureMaxBytes) write past the buffer before matching.
+                std::vector<std::uint8_t> buffer(static_cast<std::size_t>(kChunkBytes + size - 1));
                 for (;;)
                 {
                     const std::size_t item = next.fetch_add(1);
@@ -2186,7 +2193,9 @@ namespace Manifold::Scan
                         ++progress->Done;
                     const WorkChunk& chunk = chunks[item];
                     const std::size_t readSize = static_cast<std::size_t>(chunk.ReadEnd - chunk.Base);
-                    if (readSize < size || process.Read(chunk.Base, buffer.data(), readSize) == 0)
+                    // ∑ Kept as a release-time guard: a read that does not fit is skipped, never written past the
+                    //   buffer, and the boundary tests in scanbuffers then miss their match.
+                    if (readSize < size || readSize > buffer.size() || process.Read(chunk.Base, buffer.data(), readSize) == 0)
                         continue;
                     const std::size_t last = std::min<std::size_t>(static_cast<std::size_t>(chunk.Size), readSize - static_cast<std::size_t>(size) + 1);
                     for (std::size_t offset = 0; offset < last; ++offset)
