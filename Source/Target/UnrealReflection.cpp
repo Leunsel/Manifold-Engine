@@ -1025,7 +1025,8 @@ namespace Manifold::Target
             if (f->Type == "ArrayProperty" && index)
             {
                 const std::uint64_t data = ReadPointer(slot).value_or(0);
-                slot = data ? data + static_cast<std::uint64_t>(*index) * static_cast<std::uint64_t>(m_pointer) : 0;
+                const std::int32_t count = ReadInt(slot + static_cast<std::uint64_t>(m_pointer)).value_or(0);
+                slot = data && *index < count ? data + static_cast<std::uint64_t>(*index) * static_cast<std::uint64_t>(m_pointer) : 0;
             }
             current = slot ? ReadPointer(slot).value_or(0) : 0;
         }

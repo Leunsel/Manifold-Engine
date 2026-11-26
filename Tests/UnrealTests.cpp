@@ -1156,6 +1156,23 @@ namespace Manifold::Tests
                 }
             }
         }
+        {
+            FakeUnreal3::Builder builder;
+            CHECK(builder.Build(false));
+            const Fake3 fake = Widen3(builder.Fake);
+            const FakeUnreal3::Offsets& o = FakeUnreal3::Native(false);
+            const std::int32_t none = 0;
+            std::memcpy(reinterpret_cast<void*>(static_cast<std::uintptr_t>(fake.Engine) + FakeUnreal3::kGamePlayers + o.Pointer), &none, sizeof(none));
+            Target::UnrealRuntime runtime;
+            const Status status = runtime.Resolve(engine.Process(), Target::UnrealConfig{}, true, nullptr);
+            CHECK_MSG(status.Ok(), "UE3 no local player: " + status.Text);
+            if (status)
+            {
+                CHECK_MSG(runtime.Engine() == fake.Engine, "UE3 no local player: engine");
+                CHECK_MSG(runtime.Controller() == 0 && runtime.Pawn() == 0 && runtime.World() == 0,
+                    "UE3 no local player: controller " + Hex(runtime.Controller(), 0) + ", pawn " + Hex(runtime.Pawn(), 0) + ", world " + Hex(runtime.World(), 0));
+            }
+        }
         engine.CloseProcess();
         SyntheticTarget(target.parent_path() / L"TestTarget32.exe", FakeUnreal::kOffsets32, "32-bit target");
         SyntheticTarget(target.parent_path() / L"TestTarget.exe", FakeUnreal::kOffsets64, "64-bit target");
