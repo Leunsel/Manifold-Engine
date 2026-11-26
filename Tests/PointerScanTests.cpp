@@ -432,6 +432,49 @@ namespace Manifold::Tests
             return world;
         }
 
+        void FailedSaveKeepsOldFile()
+        {
+            const World few = BuildWide(8, 100);
+            Scan::PointerResults old;
+            CHECK(Scan::ScanPointers(*few.Memory, Options(few, 3), old).Ok());
+            const World many = BuildWide(8, 3000);
+            Scan::PointerResults fresh;
+            CHECK(Scan::ScanPointers(*many.Memory, Options(many, 3), fresh).Ok());
+            CHECK(old.Count() == 100 && fresh.Count() == 3000);
+
+            std::error_code ignored;
+            const std::filesystem::path folder = Paths::DataFolder() / L"pointer-save-test";
+            std::filesystem::create_directories(folder, ignored);
+            const std::filesystem::path file = folder / L"kept.mptr";
+            const Status first = old.Save(file);
+            CHECK_MSG(first.Ok(), first.Text);
+            const std::uint64_t oldSize = std::filesystem::file_size(file, ignored);
+            CHECK(oldSize + 8192 < fresh.Count() * fresh.RecordSize());
+
+            const HANDLE other = ::CreateFileW(file.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            CHECK(other != INVALID_HANDLE_VALUE);
+            OVERLAPPED at{};
+            at.Offset = static_cast<DWORD>(oldSize + 4096);
+            const bool locked = other != INVALID_HANDLE_VALUE && ::LockFileEx(other, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 4096, 0, &at);
+            CHECK(locked);
+            const Status second = fresh.Save(file);
+            if (other != INVALID_HANDLE_VALUE)
+                ::CloseHandle(other);
+
+            Scan::PointerResults loaded;
+            const Status read = loaded.Load(file);
+            const std::uint64_t expected = second.Ok() ? fresh.Count() : old.Count();
+            CHECK_MSG(read.Ok() && loaded.Count() == expected,
+                Format("save over a file that fails part way (%s): the file then loads as %s with %llu paths", second.Ok() ? "saved" : second.Text.c_str(), read.Ok() ? "ok" : read.Text.c_str(),
+                    static_cast<unsigned long long>(loaded.Count())));
+            std::size_t left = 0;
+            for (const auto& entry : std::filesystem::directory_iterator(folder, ignored))
+                left += entry.path() != file ? 1 : 0;
+            CHECK_MSG(left == 0, Format("%zu other files left next to the saved file", left));
+            std::filesystem::remove(file, ignored);
+            std::filesystem::remove(folder, ignored);
+        }
+
         void SpillSaveSort()
         {
             constexpr int kSlots = 3000;
@@ -979,6 +1022,7 @@ namespace Manifold::Tests
             RescanByRoundedValue(pointerSize);
         }
         SpillSaveSort();
+        FailedSaveKeepsOldFile();
         Cancelled();
         ParallelMatchesSerial();
         if constexpr (sizeof(void*) == 8)
