@@ -102,6 +102,8 @@ namespace FakeUnreal
     inline constexpr int kLocationDouble = 0x120;
     inline constexpr int kLookup = 0x30;
     inline constexpr int kContainersEnd = 0xF8;
+    inline constexpr int kBuffer = 0x140;
+    inline constexpr int kBufferDim = 100;
     inline constexpr int kBigFields = 7000;
     inline constexpr int kBigFirst = 0x100;
     inline constexpr int kBigSize = kBigFirst + 4 * kBigFields;
@@ -250,6 +252,8 @@ namespace FakeUnreal
                 next = Field(FieldClassNamed("StrProperty"), Fake.SceneComponent, "Label", 0xD0, o.Pointer + 8, next);
                 next = Field(FieldClassNamed("DelegateProperty"), Fake.SceneComponent, "OnHit", 0xE0, 0x10, next);
                 next = Field(FieldClassNamed("WeakObjectProperty"), Fake.SceneComponent, "Target", 0xF0, 8, next);
+                next = Field(FieldClassNamed("ByteProperty"), Fake.SceneComponent, "Buffer", kBuffer, 1, next);
+                Put<std::int32_t>(next, o.FieldDim, kBufferDim);
                 Put<std::uintptr_t>(Fake.SceneComponent, o.ChildProperties, next);
             }
 

@@ -1105,6 +1105,15 @@ namespace Manifold::Tests
                     }
                     CHECK_MSG(inside.empty(), label + ": \"(not reflected)\" rows inside properties at" + inside);
                     CHECK_MSG(at("(not reflected)", FakeUnreal::kContainersEnd), label + ": the gap after the last property is still shown");
+                    const int bufferEnd = FakeUnreal::kBuffer + FakeUnreal::kBufferDim;
+                    std::string elements;
+                    for (const Table::StructField& f : fill.Fields)
+                    {
+                        if (f.Name == "(not reflected)" && f.Offset >= FakeUnreal::kBuffer && f.Offset < bufferEnd)
+                            elements += " " + Hex(f.Offset, 0);
+                    }
+                    CHECK_MSG(at("Buffer[63]", FakeUnreal::kBuffer + 63) && elements.empty(), label + ": \"(not reflected)\" rows inside Buffer[100] at" + elements);
+                    CHECK_MSG(at("(not reflected)", bufferEnd), label + ": the gap after Buffer is still shown");
                 }
             }
         }
