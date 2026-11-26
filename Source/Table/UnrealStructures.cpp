@@ -32,6 +32,8 @@ namespace Manifold::Table
             int Bit = -1;
             int Order = 0;
             int Width = 8;
+            // The bytes of the property behind the row, when the row is capped below it (0: the row's width).
+            int Cover = 0;
         };
 
         // The embedded structures of one fill, shared by its nested fillers: their definitions, and the names
@@ -102,13 +104,13 @@ namespace Manifold::Table
             bool Incomplete() const { return m_incomplete; }
             std::vector<UnrealArrayRef>& Arrays() { return m_arrays; }
 
-            void Add(int offset, std::string name, ValueType type, int width, FieldDisplay display = FieldDisplay::Unsigned, std::string custom = {}, int bit = -1,
+            bool Add(int offset, std::string name, ValueType type, int width, FieldDisplay display = FieldDisplay::Unsigned, std::string custom = {}, int bit = -1,
                 std::string child = {})
             {
                 if (m_count >= m_ceiling)
                 {
                     m_truncated = true;
-                    return;
+                    return false;
                 }
                 ++m_count;
                 Spec spec;
@@ -123,6 +125,16 @@ namespace Manifold::Table
                 spec.Order = m_count;
                 spec.Width = std::max(1, width);
                 m_specs.push_back(std::move(spec));
+                return true;
+            }
+
+            // ∑ A row capped below its property (an embedded struct over kMaxFieldBytes, an unknown kind over 256
+            //   bytes) still covers the whole property, else Gaps() filled its remaining bytes with
+            //   "(not reflected)" rows (#9).
+            void AddCapped(int offset, std::string name, int size, int cap, std::string child = {})
+            {
+                if (Add(offset, std::move(name), ValueType::ByteArray, std::clamp(size, 1, cap), FieldDisplay::Unsigned, {}, -1, std::move(child)))
+                    m_specs.back().Cover = std::max(1, size);
             }
 
             // ∑ A struct member is one embedded field (like a Mono value type), not its members spread out with
@@ -130,7 +142,7 @@ namespace Manifold::Table
             void Embed(const Target::UnrealField& f, int offset, const std::string& name, int depth)
             {
                 const std::string child = m_runtime.CppName(f.Inner);
-                Add(offset, name, ValueType::ByteArray, std::clamp(f.Size, 1, kMaxFieldBytes), FieldDisplay::Unsigned, {}, -1, child);
+                AddCapped(offset, name, f.Size, kMaxFieldBytes, child);
                 if (m_base)
                     CollectArrays(f.Inner, offset, depth + 1);
                 if (depth >= kInlineDepth)
@@ -286,7 +298,7 @@ namespace Manifold::Table
                 if (type != ValueType::ByteArray)
                     Add(offset, Annotated(name, m_runtime.TypeText(f)), type, size, FieldDisplay::Hex);
                 else
-                    Add(offset, Annotated(name, m_runtime.TypeText(f)), ValueType::ByteArray, std::min(size, 256));
+                    AddCapped(offset, Annotated(name, m_runtime.TypeText(f)), size, 256);
             }
 
             void Field(const Target::UnrealField& f, int base, const std::string& prefix, int depth)
@@ -325,7 +337,7 @@ namespace Manifold::Table
             {
                 std::vector<std::pair<int, int>> ranges;
                 for (const Spec& spec : m_specs)
-                    ranges.push_back({ spec.Offset, spec.Offset + spec.Width });
+                    ranges.push_back({ spec.Offset, spec.Offset + std::max(spec.Width, spec.Cover) });
                 std::sort(ranges.begin(), ranges.end());
                 std::vector<std::pair<int, int>> gaps;
                 int cursor = 0;

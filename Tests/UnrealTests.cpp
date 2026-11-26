@@ -444,7 +444,12 @@ namespace Manifold::Tests
                     const std::string child = runtime.CppName(fake->BigStruct);
                     const Table::UnrealFill first = Table::FillUnrealObject(runtime, fake->BigInstance, true);
                     const auto* cut = StructNamed(first, child);
-                    CHECK_MSG(first.Fields.size() < static_cast<std::size_t>(Table::kUnrealFieldLimit) && first.Truncated && !first.Incomplete, "big struct: " + std::to_string(first.Fields.size()) + " class rows");
+                    CHECK_MSG(first.Fields.size() < 64 && first.Truncated && !first.Incomplete, "big struct: " + std::to_string(first.Fields.size()) + " class rows");
+                    // #9: the Payload row is capped at kMaxFieldBytes, but no gap row lies inside the 28,000 bytes it covers.
+                    const int payloadEnd = FakeUnreal::kBigFirst + 4 * 7000;
+                    const auto inside = std::find_if(first.Fields.begin(), first.Fields.end(), [&](const Table::StructField& f)
+                        { return f.Name == "(not reflected)" && f.Offset >= FakeUnreal::kBigFirst && f.Offset < payloadEnd; });
+                    CHECK_MSG(inside == first.Fields.end(), "big struct: a \"(not reflected)\" row at " + std::to_string(inside == first.Fields.end() ? -1 : inside->Offset) + " inside Payload");
                     CHECK_MSG(first.CutStructs == std::vector<std::string>{ child }, "big struct: " + std::to_string(first.CutStructs.size()) + " cut structures");
                     CHECK_MSG(cut && cut->size() == static_cast<std::size_t>(Table::kUnrealFieldLimit), "big struct: " + std::to_string(cut ? cut->size() : 0) + " struct rows");
 
