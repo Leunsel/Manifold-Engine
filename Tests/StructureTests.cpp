@@ -569,6 +569,21 @@ namespace Manifold::Tests
                 bounded.Record("Many", std::move(before), many.Fields, "Add Field");
             }
             CHECK_EQ(bounded.UndoCount(), Table::StructureHistory::kLimit);
+
+            Table::StructDefinition& wide = store.Add("Wide");
+            const std::size_t fields = Table::StructureHistory::kLimit + 50;
+            for (std::size_t i = 0; i < fields; ++i)
+                wide.Fields.push_back(MakeField(static_cast<int>(i) * 4, "F", Scan::ValueType::FourBytes, 4));
+            Table::StructureHistory large;
+            for (std::size_t i = 0; i < fields; ++i)
+            {
+                std::vector<Table::StructField> before = wide.Fields;
+                wide.Fields.erase(wide.Fields.begin());
+                large.Record("Wide", std::move(before), wide.Fields, "Delete Fields", {}, 9);
+            }
+            CHECK(large.Undo(store));
+            CHECK_MSG(wide.Fields.size() == fields, std::to_string(wide.Fields.size()) + " fields after the undo");
+            CHECK(!large.CanUndo());
         }
     }
 

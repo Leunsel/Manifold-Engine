@@ -318,7 +318,7 @@ namespace Manifold::Table
             return;
         }
         m_undo.push_back({ structure, std::move(before), std::move(after), std::move(label), std::move(merge), group });
-        if (m_undo.size() > kLimit)
+        if (m_undo.size() > kLimit && !(group && m_undo.front().Group == group))
         {
             // Drops a whole group from the bottom, so no group is left half undoable.
             const std::uint64_t oldest = m_undo.front().Group;
