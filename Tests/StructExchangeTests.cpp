@@ -247,6 +247,86 @@ namespace Manifold::Tests
             CHECK(ImportStructures("int x; void f();", {}).Error().Code == ErrorCode::StructNotFound);
         }
 
+        // #11: function pointers and pointers to members. The expected numbers are
+        // offsetof/sizeof from cl 19.4x (VS 2022) on the same text, x64 then x86.
+        void CheckFunctionPointers()
+        {
+            static constexpr std::string_view kText =
+                "struct A { int a; }; struct B { int b; };\n"
+                "struct Single : A { void f(); };\n"
+                "struct Multi : A, B { void f(); };\n"
+                "struct Virt : virtual A { void f(); };\n"
+                "struct Poly : A { virtual void f(); };\n"
+                "struct Poly2 : Poly { };\n"
+                "struct Fwd;\n"
+                "struct Mystery;\n"
+                "typedef void (*Callback)(int);\n"
+                "using Handler = void (Multi::*)();\n"
+                "struct CallbackRecord { void (*callback)(); unsigned int state; };\n"
+                "struct Arr { void (__stdcall *cbs[3])(int); char tail; };\n"
+                "struct Ret { Mystery* (__stdcall *make)(int) noexcept; int tail; };\n"
+                "struct Aliased { char c; Callback cb; Handler h; char tail; };\n"
+                "struct Self { int x; void (Self::*m)(); char tail; };\n"
+                "struct S1 { char c; void (Single::*m)(); char tail; };\n"
+                "struct S2 { char c; void (Multi::*m)(); char tail; };\n"
+                "struct S3 { char c; void (Virt::*m)(); char tail; };\n"
+                "struct S4 { char c; void (Fwd::*m)(); char tail; };\n"
+                "struct F5 { char c; void (Poly2::*m)(); char tail; };\n"
+                "struct D3 { char c; int Virt::*m; char tail; };\n"
+                "struct D4 { char c; int Fwd::*m; char tail; };\n"
+                "struct PArr { int (*p)[4]; char tail; };\n"
+                "struct Methods { int a; void f(); void (*get(int))(); int tail; };\n";
+            struct Expected
+            {
+                std::string_view Structure;
+                std::string_view Field;
+                int Offset64, Size64, Offset32, Size32;
+            };
+            static constexpr Expected kNative[] = {
+                { "CallbackRecord", "state", 8, 16, 4, 8 }, { "Arr", "tail", 24, 32, 12, 16 }, { "Ret", "tail", 8, 16, 4, 8 },
+                { "Aliased", "h", 16, 40, 8, 24 }, { "Aliased", "tail", 32, 40, 16, 24 }, { "Self", "m", 8, 24, 4, 12 },
+                { "Self", "tail", 16, 24, 8, 12 }, { "S1", "tail", 16, 24, 8, 12 }, { "S2", "tail", 24, 32, 16, 24 },
+                { "S3", "tail", 24, 32, 20, 24 }, { "S4", "tail", 32, 40, 24, 32 }, { "F5", "tail", 24, 32, 16, 24 },
+                { "D3", "tail", 12, 16, 16, 24 }, { "D4", "m", 4, 20, 8, 24 }, { "D4", "tail", 16, 20, 20, 24 },
+                { "PArr", "tail", 8, 16, 4, 8 }, { "Methods", "tail", 4, 8, 4, 8 } };
+            for (const bool is64 : { true, false })
+            {
+                const StructImport imported = Import(kText, is64);
+                const int pointer = is64 ? 8 : 4;
+                for (const Expected& expected : kNative)
+                {
+                    const StructDefinition* definition = Named(imported.Structures, expected.Structure);
+                    const int offset = is64 ? expected.Offset64 : expected.Offset32;
+                    const int size = is64 ? expected.Size64 : expected.Size32;
+                    CHECK_MSG(definition && At(definition, offset, expected.Field) && definition->Size() == size,
+                        Format("%s %.*s.%.*s: want %d / %d, got ", is64 ? "x64" : "x86", static_cast<int>(expected.Structure.size()), expected.Structure.data(),
+                            static_cast<int>(expected.Field.size()), expected.Field.data(), offset, size) + Offsets(definition));
+                }
+                // the callback is one pointer field; the parts of a member pointer have names
+                const StructDefinition* record = Named(imported.Structures, "CallbackRecord");
+                CHECK(At(record, 0, "callback") && At(record, 0, "callback")->Type == ValueType::Pointer && At(record, 0, "callback")->Size == pointer);
+                const StructDefinition* arr = Named(imported.Structures, "Arr");
+                CHECK_MSG(At(arr, 0, "cbs[0]") && At(arr, 2 * pointer, "cbs[2]"), Offsets(arr));
+                const StructDefinition* s2 = Named(imported.Structures, "S2");
+                CHECK_MSG(At(s2, 8, "m") && At(s2, 8, "m")->Type == ValueType::Pointer && At(s2, 8 + pointer, "m_thisAdjust"), Offsets(s2));
+                const StructDefinition* s4 = Named(imported.Structures, "S4");
+                CHECK_MSG(At(s4, 8 + pointer, "m_thisAdjust") && At(s4, 12 + pointer, "m_vbptrOffset") && At(s4, 16 + pointer, "m_vbIndex"), Offsets(s4));
+                const StructDefinition* d4 = Named(imported.Structures, "D4");
+                const int d4m = is64 ? 4 : 8;
+                CHECK_MSG(At(d4, d4m, "m") && At(d4, d4m + 4, "m_vbptrOffset") && At(d4, d4m + 8, "m_vbIndex"), Offsets(d4));
+                CHECK(!At(Named(imported.Structures, "Methods"), 4, "get"));
+                // the only warnings: the two pointers to members of Fwd, which is never defined
+                int general = 0;
+                for (const std::string& warning : imported.Warnings)
+                    general += warning.find("Fwd is not defined") != std::string::npos;
+                CHECK_MSG(imported.Warnings.size() == 2 && general == 2, imported.Warnings.empty() ? std::string("no warnings") : imported.Warnings.front());
+            }
+
+            // a declaration in parentheses that is no pointer says so instead of shifting silently
+            const StructImport odd = Import("struct O { int (x); int y; };");
+            CHECK(!odd.Warnings.empty() && odd.Warnings.front().find("parentheses") != std::string::npos);
+        }
+
         void CheckCSharp()
         {
             StructureStore store;
@@ -388,6 +468,7 @@ namespace Manifold::Tests
             CheckExportCpp();
             CheckRoundTripCpp();
             CheckMsvcLayout();
+            CheckFunctionPointers();
             CheckCSharp();
             CheckReClass();
             CheckMerge();

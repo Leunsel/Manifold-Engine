@@ -637,6 +637,19 @@ namespace Manifold::Table
             Bool,
             Pointer,
             Struct,
+            MemberFunction,  // void (Class::*)(): the code address, then int adjustments
+            MemberData,      // int Class::*: an int offset, then int adjustments
+            Unknown
+        };
+
+        // ∑ MSVC picks the representation of a pointer to member from the class:
+        //   Single, Multiple and Virtual inheritance, Unknown for a class it has not
+        //   seen. Each step adds an int (measured against cl x86 and x64).
+        enum class InheritanceModel
+        {
+            Single,
+            Multiple,
+            Virtual,
             Unknown
         };
 
@@ -647,6 +660,17 @@ namespace Manifold::Table
             int Align = 1;
             bool Signed = false;
             std::string Struct;  // Struct: the embedded one; Pointer: what it points to (may be defined later)
+            InheritanceModel Model = InheritanceModel::Single;  // MemberFunction, MemberData
+        };
+
+        // A declarator in parentheses: (*name)(...), (__stdcall *name[4])(...), (Class::*name)(...).
+        struct ParenDeclaration
+        {
+            std::string Name;      // empty in a type alias: using F = void (*)();
+            int Count = 0;
+            std::string MemberOf;  // the class of a pointer to member
+            bool Function = false; // a parameter list follows
+            bool Method = false;   // R (*name(int))(): a function returning a function pointer
         };
 
         struct Parsed
@@ -869,11 +893,23 @@ namespace Manifold::Table
                         return;
                     }
                     std::string base;
+                    int bases = 0;
+                    bool virtualInheritance = false;
                     if (Accept(":"))
                     {
+                        bases = 1;
+                        int depth = 0;  // template arguments: Base<A, B>
                         while (!AtEnd() && !Is("{"))
                         {
                             const Token& part = Next();
+                            if (part.Text == "<")
+                                ++depth;
+                            else if (part.Text == ">" && depth > 0)
+                                --depth;
+                            else if (part.Text == "," && depth == 0)
+                                ++bases;
+                            else if (part.Text == "virtual")
+                                virtualInheritance = true;
                             if (part.Kind == TokenKind::Word && !Modifier(part.Text) && part.Text != "virtual" && base.empty())
                                 base = part.Text;
                         }
@@ -883,8 +919,24 @@ namespace Manifold::Table
                         SkipStatement();
                         return;
                     }
+                    // ∑ Known from the base clause on, so a pointer to a member of the class
+                    //   inside its own body already has its final size.
+                    InheritanceModel model = InheritanceModel::Single;
+                    if (virtualInheritance)
+                        model = InheritanceModel::Virtual;
+                    else if (bases > 1)
+                        model = InheritanceModel::Multiple;
+                    else if (bases == 1 && m_models.count(base))
+                        model = m_models[base];
+                    if (!name.empty())
+                        m_models[name] = model;
                     Parsed parsed = Body(name, isUnion, base);
+                    // a polymorphic class on a base without virtual functions: its base is
+                    // not at offset 0, so it takes the multiple inheritance form
+                    if (model == InheritanceModel::Single && bases == 1 && parsed.Virtual && m_structs.count(base) && !m_virtual.count(base))
+                        model = InheritanceModel::Multiple;
                     Define(parsed);
+                    m_models[parsed.Definition.Name] = model;
                     // struct Name { } instance;  -> nothing to keep at the top level
                     if (!m_csharp)
                         SkipStatement();
@@ -905,6 +957,15 @@ namespace Manifold::Table
                 int stars = 0;
                 while (Accept("*"))
                     ++stars;
+                if (Is("("))
+                {
+                    if (!PointerAlias(name, type, line))
+                    {
+                        Warn(line, "the alias " + name + " is not read");
+                        SkipStatement();
+                    }
+                    return;
+                }
                 if (type)
                 {
                     if (stars)
@@ -961,16 +1022,38 @@ namespace Manifold::Table
                     }
                 }
                 // typedef <type> Name;
+                const int line = Peek().Line;
                 std::optional<TypeInfo> type = TypeSpec();
                 int stars = 0;
                 while (Accept("*"))
                     ++stars;
+                if (Is("("))
+                {
+                    if (!PointerAlias({}, type, line))
+                        SkipStatement();  // a function type or an array of pointers: no alias
+                    return;
+                }
                 if (type && Peek().Kind == TokenKind::Word)
                 {
                     const std::string name = Next().Text;
                     m_aliases[name] = stars ? PointerTo(*type) : *type;
                 }
                 SkipStatement();
+            }
+
+            // typedef void (*Name)();  using Name = void (*)();  typedef void (Class::*Name)();
+            // The declarator names the alias of a typedef (name empty).
+            bool PointerAlias(const std::string& name, const std::optional<TypeInfo>& type, int line)
+            {
+                const std::optional<ParenDeclaration> declaration = ParenDeclarator(line);
+                if (!declaration || declaration->Method || declaration->Count)
+                    return false;
+                const std::string alias = name.empty() ? declaration->Name : name;
+                if (alias.empty())
+                    return false;
+                m_aliases[alias] = DeclaredType(*declaration, type);
+                SkipStatement();
+                return true;
             }
 
             void Enum()
@@ -1008,6 +1091,116 @@ namespace Manifold::Table
                 if (target.Kind == Basic::Struct)
                     pointer.Struct = target.Struct;
                 return pointer;
+            }
+
+            // ∑ MSVC layout, measured with cl x86 and x64:
+            //   void (C::*)()  Single 4/8, Multiple 8/16, Virtual 12/16, Unknown 16/24
+            //   int C::*       Single and Multiple 4, Virtual 8, Unknown 12
+            //   A form with more than one part is 8 aligned on x86 as well. GCC and
+            //   MinGW use two pointers for every function form; that is not read.
+            TypeInfo MemberPointer(const std::string& owner, bool function) const
+            {
+                InheritanceModel model = InheritanceModel::Unknown;
+                if (const auto it = m_models.find(owner); it != m_models.end())
+                    model = it->second;
+                else if (m_structs.count(owner))
+                    model = InheritanceModel::Single;
+                const int steps = static_cast<int>(model);
+                TypeInfo type;
+                type.Kind = function ? Basic::MemberFunction : Basic::MemberData;
+                type.Model = model;
+                type.Struct = owner;  // for the warning only
+                type.Signed = !function;
+                const int parts = function ? steps : std::max(steps - 1, 0);
+                type.Size = function ? AlignUp(m_pointer + 4 * parts, m_pointer) : 4 + 4 * parts;
+                type.Align = parts > 0 && m_pointer == 4 ? 8 : function ? m_pointer : 4;
+                return type;
+            }
+
+            // At "(" after the type. On anything else than a pointer declarator the
+            // position is left as it was.
+            std::optional<ParenDeclaration> ParenDeclarator(int line)
+            {
+                static const std::set<std::string, std::less<>> kQualifiers = { "const", "volatile", "__restrict", "restrict", "__ptr32", "__ptr64", "__unaligned", "__sptr", "__uptr" };
+                const std::size_t start = m_at;
+                const auto fail = [&]() -> std::optional<ParenDeclaration>
+                    {
+                        m_at = start;
+                        return std::nullopt;
+                    };
+                ParenDeclaration result;
+                Next();
+                // calling conventions and macros before the pointer: __stdcall, WINAPI, __attribute__((x))
+                while (Peek().Kind == TokenKind::Word && !Is("::", 1))
+                {
+                    Next();
+                    if (Is("("))
+                        SkipBalanced();
+                }
+                Accept("::");
+                while (Peek().Kind == TokenKind::Word && Is("::", 1))
+                {
+                    result.MemberOf = Next().Text;  // the last name before ::* is the class
+                    Next();
+                }
+                if (!Is("*") && !Is("&"))
+                    return fail();
+                if (!result.MemberOf.empty() && !Is("*"))
+                    return fail();
+                while (Accept("*") || Accept("&"))
+                {
+                    while (Peek().Kind == TokenKind::Word && kQualifiers.count(Peek().Text))
+                        Next();
+                }
+                if (Peek().Kind == TokenKind::Word)
+                    result.Name = Next().Text;
+                if (Is("("))
+                {
+                    result.Method = true;
+                    return result;
+                }
+                while (Accept("["))
+                {
+                    int dimension = 0;
+                    if (Peek().Kind == TokenKind::Number)
+                        dimension = static_cast<int>(Next().Value);
+                    else
+                        Warn(line, "the length of " + result.Name + " is not a number");
+                    while (!AtEnd() && !Is("]") && !Is(")"))
+                        Next();
+                    if (!Accept("]"))
+                        return fail();
+                    result.Count = result.Count ? result.Count * dimension : dimension;
+                }
+                if (!Accept(")"))
+                    return fail();
+                if (Is("("))
+                {
+                    result.Function = true;
+                    SkipBalanced();
+                    // const, noexcept(...), throw(...), & and the like after the parameters
+                    while (Is("&") || (Peek().Kind == TokenKind::Word && (kQualifiers.count(Peek().Text) || Is("noexcept") || Is("throw"))))
+                    {
+                        Next();
+                        if (Is("("))
+                            SkipBalanced();
+                    }
+                }
+                else
+                {
+                    while (Is("["))
+                        SkipBalanced();  // int (*p)[4]: one pointer to an array
+                }
+                return result;
+            }
+
+            TypeInfo DeclaredType(const ParenDeclaration& declaration, const std::optional<TypeInfo>& target) const
+            {
+                if (!declaration.MemberOf.empty())
+                    return MemberPointer(declaration.MemberOf, declaration.Function);
+                if (declaration.Function || !target)
+                    return TypeInfo{ Basic::Pointer, m_pointer, m_pointer, false, {} };
+                return PointerTo(*target);
             }
 
             std::optional<TypeInfo> Builtin(const std::vector<std::string>& words) const
@@ -1224,6 +1417,35 @@ namespace Manifold::Table
                         }
                         parsed.Definition.Fields.push_back(field);
                     };
+                if (type.Kind == Basic::MemberFunction || type.Kind == Basic::MemberData)
+                {
+                    // ∑ After the code address (or the data offset) MSVC keeps ints in this
+                    //   order: this adjustment (function form only), vbptr offset, vbtable index.
+                    std::vector<std::string> parts;
+                    if (type.Kind == Basic::MemberFunction && type.Model != InheritanceModel::Single)
+                        parts.push_back("thisAdjust");
+                    if (type.Model == InheritanceModel::Unknown)
+                        parts.push_back("vbptrOffset");
+                    if (type.Model == InheritanceModel::Virtual || type.Model == InheritanceModel::Unknown)
+                        parts.push_back("vbIndex");
+                    const int head = type.Kind == Basic::MemberFunction ? m_pointer : 4;
+                    const int elements = std::min(std::max(count, 1), kExpand);
+                    for (int i = 0; i < elements; ++i)
+                    {
+                        const int base = at + i * type.Size;
+                        const std::string element = count > 0 ? Format("%s[%d]", name.c_str(), i) : name;
+                        if (type.Kind == Basic::MemberFunction)
+                            plain(TypeInfo{ Basic::Pointer, m_pointer, m_pointer, false, {} }, base, element);
+                        else
+                            plain(TypeInfo{ Basic::Integer, 4, 4, true, {} }, base, element);
+                        for (std::size_t part = 0; part < parts.size(); ++part)
+                            plain(TypeInfo{ Basic::Integer, 4, 4, true, {} }, base + head + 4 * static_cast<int>(part), element + "_" + parts[part]);
+                    }
+                    if (type.Model == InheritanceModel::Unknown)
+                        Warn(line, Format("%s: %s is not defined before it, so the pointer to member takes MSVC's general form (%d bytes); "
+                                          "with the class defined it can be smaller", name.c_str(), type.Struct.c_str(), type.Size));
+                    return;
+                }
                 if (count <= 0)
                 {
                     plain(type, at, name);
@@ -1294,6 +1516,14 @@ namespace Manifold::Table
                 //   may be defined further down (or only forward declared).
                 if (!type && !m_unknown.empty() && (Is("*") || Is("&")))
                     type = TypeInfo{ Basic::Struct, 0, 1, false, m_unknown };
+                // a function pointer: the size does not depend on what it returns
+                if (!type && !m_unknown.empty() && Is("("))
+                {
+                    const std::size_t start = m_at;
+                    if (ParenDeclarator(line))
+                        type = TypeInfo{ Basic::Struct, 0, 1, false, m_unknown };
+                    m_at = start;
+                }
                 if (!type)
                 {
                     if (!m_unknown.empty())
@@ -1301,57 +1531,97 @@ namespace Manifold::Table
                     SkipStatement();
                     return;
                 }
-                if (Is("("))
-                {
-                    SkipStatement();  // operator() or a function pointer we do not read
-                    return;
-                }
                 for (;;)
                 {
                     int stars = 0;
                     while (Accept("*") || Accept("&"))
                         ++stars;
-                    if (Is(":") && Peek(1).Kind == TokenKind::Number && !stars)
-                    {
-                        // an unnamed bit field: its bits stay unused, : 0 ends the unit
-                        Next();
-                        const int bits = static_cast<int>(Next().Value);
-                        if (bits == 0)
-                            layout.UnitOffset = -1;
-                        else
-                            AddField(parsed, layout, *type, {}, 0, bits, line);
-                        if (!Accept(","))
-                            break;
-                        continue;
-                    }
-                    if (Peek().Kind != TokenKind::Word)
+                    // int Class::*name: a pointer to a data member
+                    std::string memberOf;
+                    if (Accept("::") && !(Peek().Kind == TokenKind::Word && Is("::", 1)))
                     {
                         SkipStatement();
                         return;
                     }
-                    const std::string name = Next().Text;
-                    if (Is("("))
+                    while (Peek().Kind == TokenKind::Word && Is("::", 1))
                     {
-                        SkipStatement();  // a method
+                        memberOf = Next().Text;
+                        Next();
+                    }
+                    if (!memberOf.empty() && !Accept("*"))
+                    {
+                        Warn(line, "a declaration with " + memberOf + ":: is not read; the offsets after it may be wrong");
+                        SkipStatement();
                         return;
                     }
-                    if (m_csharp && (Is("{") || (Is("=") && Is(">", 1))))
-                    {
-                        SkipStatement();  // a property
-                        return;
-                    }
+                    std::optional<TypeInfo> declared;  // set by a declarator that names its own type
+                    if (!memberOf.empty())
+                        declared = MemberPointer(memberOf, false);
+                    std::string name;
                     int count = 0;
-                    while (Accept("["))
+                    if (memberOf.empty() && Is("("))
                     {
-                        int dimension = 0;
-                        if (Peek().Kind == TokenKind::Number)
-                            dimension = static_cast<int>(Next().Value);
-                        else
-                            Warn(line, "the length of " + name + " is not a number");
-                        while (!AtEnd() && !Is("]"))
+                        // void (*callback)(), void (__stdcall *table[4])(int), void (Class::*method)()
+                        const std::optional<ParenDeclaration> declaration = ParenDeclarator(line);
+                        if (!declaration || declaration->Name.empty())
+                        {
+                            if (!declaration)
+                                Warn(line, "a declaration in parentheses is not read; the offsets after it may be wrong");
+                            SkipStatement();
+                            return;
+                        }
+                        if (declaration->Method)
+                        {
+                            SkipStatement();  // a method that returns a function pointer
+                            return;
+                        }
+                        name = declaration->Name;
+                        count = declaration->Count;
+                        declared = DeclaredType(*declaration, type);
+                    }
+                    else
+                    {
+                        if (Is(":") && Peek(1).Kind == TokenKind::Number && !stars && !declared)
+                        {
+                            // an unnamed bit field: its bits stay unused, : 0 ends the unit
                             Next();
-                        Accept("]");
-                        count = count ? count * dimension : dimension;
+                            const int bits = static_cast<int>(Next().Value);
+                            if (bits == 0)
+                                layout.UnitOffset = -1;
+                            else
+                                AddField(parsed, layout, *type, {}, 0, bits, line);
+                            if (!Accept(","))
+                                break;
+                            continue;
+                        }
+                        if (Peek().Kind != TokenKind::Word)
+                        {
+                            SkipStatement();
+                            return;
+                        }
+                        name = Next().Text;
+                        if (Is("("))
+                        {
+                            SkipStatement();  // a method
+                            return;
+                        }
+                        if (m_csharp && (Is("{") || (Is("=") && Is(">", 1))))
+                        {
+                            SkipStatement();  // a property
+                            return;
+                        }
+                        while (Accept("["))
+                        {
+                            int dimension = 0;
+                            if (Peek().Kind == TokenKind::Number)
+                                dimension = static_cast<int>(Next().Value);
+                            else
+                                Warn(line, "the length of " + name + " is not a number");
+                            while (!AtEnd() && !Is("]"))
+                                Next();
+                            Accept("]");
+                            count = count ? count * dimension : dimension;
+                        }
                     }
                     int bits = 0;
                     if (Accept(":") && Peek().Kind == TokenKind::Number)
@@ -1366,7 +1636,9 @@ namespace Manifold::Table
                                 Next();
                         }
                     }
-                    TypeInfo actual = stars ? PointerTo(*type) : *type;
+                    TypeInfo actual = declared ? *declared : stars ? PointerTo(*type) : *type;
+                    if (declared)
+                        bits = 0;
                     if (actual.Kind == Basic::Struct && actual.Size == 0)
                         Warn(line, "the structure " + actual.Struct + " is used before it is defined; " + name + " takes no room");
                     else
@@ -1553,6 +1825,7 @@ namespace Manifold::Table
             std::map<std::string, TypeInfo> m_aliases;
             std::map<std::string, std::pair<int, int>> m_structs;  // size, alignment
             std::set<std::string> m_virtual;
+            std::map<std::string, InheritanceModel> m_models;  // classes with a base clause; the others are Single
             std::map<std::string, std::vector<StructField>> m_ownFields;  // without the padding at the end, for derived classes
             std::optional<int> m_fieldOffset;
             bool m_explicit = false;

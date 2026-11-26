@@ -50,6 +50,8 @@ namespace Manifold::Table
     // C/C++ struct and class definitions (typedef struct, unions, arrays, pointers,
     // bit fields, enums, #pragma pack, MSVC alignment) or C# structs and classes
     // ([StructLayout(LayoutKind.Explicit)] with [FieldOffset], or sequential).
+    // Function pointers take a pointer; pointers to members take MSVC's size for the
+    // class's inheritance (the general form for a class not defined before them).
     // Methods, static members and access specifiers are passed over.
     Result<StructImport> ImportStructures(std::string_view text, const StructImportOptions& options);
 
