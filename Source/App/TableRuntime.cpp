@@ -723,6 +723,9 @@ namespace Manifold
         }
         for (const std::string& warning : loaded.Warnings)
             LOG_WARN("Table", warning);
+        if (!merge && loaded.CodeListEntries > 0)
+            LOG_INFO("Table", Format("The table has a Cheat Engine code list (%d %s); Manifold keeps it in the file but does not use it", loaded.CodeListEntries,
+                loaded.CodeListEntries == 1 ? "entry" : "entries"));
         m_engine.Options().AddRecentTable(WideToUtf8(path.wstring()));
         // ∑ A merge adds to a table that is not saved with it: marking it clean lost
         //   the edits made before the merge (no prompt on quit, no session backup).

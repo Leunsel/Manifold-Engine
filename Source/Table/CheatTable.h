@@ -33,6 +33,9 @@ namespace Manifold::Table
         std::vector<std::string> Warnings;
         int Version = 0;
         FileNaming Naming = FileNaming::Tag;
+        // Entries of CE's code list (<CheatCodes>, the Advanced Options window). Manifold has no code list; the section is kept
+        // in ExtraXml and written back unchanged.
+        int CodeListEntries = 0;
     };
 
     inline constexpr int kTableVersion = 45;
@@ -41,6 +44,8 @@ namespace Manifold::Table
 
     Status LoadTable(const std::filesystem::path& path, LoadedTable& table);
     Status ParseTable(std::string_view text, LoadedTable& table);
+    // The top-level sections ParseTable reads into LoadedTable's own fields; everything else goes to ExtraXml.
+    std::vector<std::string_view> KnownTableSections();
     Status SaveTable(const std::filesystem::path& path, const AddressList& list, const StructureStore& structures, const std::vector<TableSymbol>& symbols,
         FileNaming naming = FileNaming::AsLoaded);
     std::string WriteTable(const AddressList& list, const StructureStore& structures, const std::vector<TableSymbol>& symbols,

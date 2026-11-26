@@ -378,6 +378,87 @@ namespace Manifold::Tests
             }
         }
 
+        // The table as Manifold keeps it after a load (what TableRuntime::LoadTable moves where), written again.
+        std::string Resave(Table::LoadedTable& loaded)
+        {
+            Table::AddressList list;
+            list.TableLuaScript = loaded.LuaScript;
+            list.TableComment = loaded.Comments;
+            list.DisasmNotes = std::move(loaded.DisasmNotes);
+            list.Files = std::move(loaded.Files);
+            list.ExtraXml = std::move(loaded.ExtraXml);
+            list.LoadedVersion = loaded.Version;
+            list.LoadedFileNaming = loaded.Naming;
+            for (const auto& record : loaded.Records)
+                list.NoteId(record->Id);
+            for (auto& record : loaded.Records)
+                list.Add(std::move(record));
+            Table::StructureStore structures;
+            for (auto& structure : loaded.Structures)
+                structures.Items.push_back(std::move(structure));
+            return Table::WriteTable(list, structures, loaded.Symbols);
+        }
+
+        // #10: CE's code list (<CheatCodes>) survives a load and a save, and every section the reader takes as its own is written
+        // back, so no other known section can vanish the same way.
+        void TableSectionsKept()
+        {
+            {
+                // The reporter's table: a code entry, an ordinary record, an unknown extension.
+                const std::string input = "<CheatTable>"
+                    "<CheatEntries><CheatEntry><ID>1</ID><Description>Control record</Description><GroupHeader>1</GroupHeader></CheatEntry></CheatEntries>"
+                    "<CheatCodes><CodeEntry><Description>Saved code</Description><AddressString>example.exe+100</AddressString></CodeEntry></CheatCodes>"
+                    "<ExampleExtension><Data>Control extension</Data></ExampleExtension>"
+                    "</CheatTable>";
+                Table::LoadedTable loaded;
+                CHECK(Table::ParseTable(input, loaded).Ok() && loaded.Warnings.empty());
+                CHECK_EQ(loaded.CodeListEntries, 1);
+                const std::string saved = Resave(loaded);
+                for (const char* text : { "Saved code", "example.exe+100", "Control record", "Control extension" })
+                    CHECK_MSG(saved.find(text) != std::string::npos, std::string("#10: \"") + text + "\" lost on save");
+            }
+
+            // A table with every known section, and a code list as CE writes it: a group header with a colour and an entry with
+            // its bytes.
+            Table::AddressList list;
+            list.AddValue("Health", "game.exe+10", Scan::ValueType::FourBytes);
+            list.TableLuaScript = "print('lua')";
+            list.TableComment = "table comment";
+            list.DisasmNotes["game.exe+20"] = { "note", "" };
+            Table::TableFile file;
+            file.Name = "data.txt";
+            *file.Data = { 'x', 'y' };
+            list.Files.push_back(file);
+            Table::StructureStore structures;
+            structures.Add("Player").Fields.push_back({ 0x10, "Health", Scan::ValueType::FourBytes, 4, Table::FieldDisplay::Signed, false, "" });
+            std::string input = Table::WriteTable(list, structures, { { "base", "game.exe+30" } });
+            const std::string codes = "<CheatCodes>"
+                "<CodeEntry Color=\"000000FF\" GroupHeader=\"1\"><Description>Hooks</Description></CodeEntry>"
+                "<CodeEntry><Description>Damage</Description><AddressString>game.exe+1234</AddressString>"
+                "<Before><Byte>48</Byte><Byte>8B</Byte></Before><Actual><Byte>29</Byte><Byte>C8</Byte></Actual><After><Byte>89</Byte></After></CodeEntry>"
+                "</CheatCodes><Signature>not checked</Signature>";
+            const std::size_t end = input.rfind("</CheatTable>");
+            CHECK(end != std::string::npos);
+            if (end == std::string::npos)
+                return;
+            input.insert(end, codes);
+            Table::LoadedTable loaded;
+            CHECK(Table::ParseTable(input, loaded).Ok());
+            CHECK_EQ(loaded.CodeListEntries, 2);
+            const std::string saved = Resave(loaded);
+            for (const std::string_view section : Table::KnownTableSections())
+            {
+                const bool written = saved.find("<" + std::string(section) + ">") != std::string::npos || saved.find("<" + std::string(section) + " ") != std::string::npos;
+                // Signature is left out on purpose: CE writes no signature on a plain save either.
+                CHECK_MSG(written == (section != "Signature"), "known section " + std::string(section) + (written ? " written" : " lost on save"));
+            }
+            for (const char* text : { "<CheatCodes>", "GroupHeader=\"1\"", "Color=\"000000FF\"", "<AddressString>game.exe+1234</AddressString>", "<Byte>C8</Byte>", "<After>" })
+                CHECK_MSG(saved.find(text) != std::string::npos, std::string("code list: ") + text + " lost on save");
+            Table::LoadedTable again;
+            CHECK(Table::ParseTable(saved, again).Ok() && again.CodeListEntries == 2);
+            CHECK_MSG(Resave(again) == saved, "a second save changes the table");
+        }
+
         void AutoAssemblerOffline()
         {
             Asm::AaHost host;
@@ -2146,6 +2227,7 @@ hostileRan = true
         LogEntries();
         XmlParsing();
         TableRoundTrip();
+        TableSectionsKept();
         AutoAssemblerOffline();
         CodeSearchHelpers();
         ScanKinds();

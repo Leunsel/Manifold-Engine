@@ -21,7 +21,11 @@ namespace Manifold::Table
     {
         constexpr const char* kScriptType = "Auto Assembler Script";
         constexpr std::string_view kBase85 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%()*+,-./:;=?@[]^_{}";
-        constexpr const char* kKnownTopLevel[] = { "CheatEntries", "UserdefinedSymbols", "Structures", "LuaScript", "Comments", "Files", "Signature", "CheatCodes", "DisassemblerComments" };
+        // ∑ The sections ParseTable reads into its own fields; every other top-level element is kept as it was (ExtraXml) and written
+        //   back. A name on this list must therefore be written by WriteTable too, or one Save drops it: <CheatCodes> (CE's code
+        //   list) was on it with no reader or writer and vanished from every saved table (#10). Signature is left out on purpose,
+        //   like CE, which writes no signature on a plain save either. Suite core checks the whole list.
+        constexpr const char* kKnownTopLevel[] = { "CheatEntries", "UserdefinedSymbols", "Structures", "LuaScript", "Comments", "Files", "Signature", "DisassemblerComments" };
 
         struct OptionName
         {
@@ -524,6 +528,8 @@ namespace Manifold::Table
                 table.DisasmNotes[address] = std::move(note);
             }
         }
+        if (const Xml::Node* codes = root.Child("CheatCodes"))
+            table.CodeListEntries = static_cast<int>(codes->ChildrenNamed("CodeEntry").size());
         for (const auto& child : root.Children)
         {
             const bool known = std::any_of(std::begin(kKnownTopLevel), std::end(kKnownTopLevel), [&](const char* name) { return child->Name == name; });
@@ -531,6 +537,11 @@ namespace Manifold::Table
                 table.ExtraXml.push_back(Xml::Write(*child, false));
         }
         return Status::Success();
+    }
+
+    std::vector<std::string_view> KnownTableSections()
+    {
+        return { std::begin(kKnownTopLevel), std::end(kKnownTopLevel) };
     }
 
     Status LoadTable(const std::filesystem::path& path, LoadedTable& table)
