@@ -64,6 +64,7 @@ namespace Manifold::Target
         };
 
         const std::vector<std::string> kControllerPath = { "GameViewport", "World", "OwningGameInstance", "LocalPlayers[0]", "PlayerController" };
+        const std::vector<std::string> kControllerPathUe3 = { "GamePlayers[0]", "Actor" };
         constexpr std::int64_t kMaxWalkIndex = 0x00FFFFFF;
 
         void SortFields(std::vector<UnrealField>& list)
@@ -139,10 +140,13 @@ namespace Manifold::Target
         step("Finding the name table");
         m_pool = 0;
         m_legacyNames = config.LegacyNames;
+        m_flatNames = false;
+        m_legacyShift = 1;
+        m_legacyWide = -1;
         if (config.NamePool)
         {
             if (!CheckNamePool(config.NamePool, config.LegacyNames))
-                return fail("the configured name table at " + Hex(config.NamePool) + (config.LegacyNames ? " is no TNameEntryArray" : " is no FNamePool"));
+                return fail("the configured name table at " + Hex(config.NamePool) + (config.LegacyNames ? " is no TNameEntryArray or GNames array" : " is no FNamePool"));
             m_pool = config.NamePool;
         }
         for (const UnrealPattern& pattern : config.NamePatterns)
@@ -153,7 +157,16 @@ namespace Manifold::Target
             if (target && CheckNamePool(target, config.LegacyNames))
                 m_pool = target;
         }
-        if (!m_pool)
+        if (m_pool && m_legacyNames)
+            m_flatNames = IsFlatNameArray(m_pool);
+        // ∑ The flat UE3 GNames array is looked for first: it only reads the main module's data sections, and
+        //   the two memory-wide searches below cost seconds in a UE3 game where they cannot succeed.
+        if (!m_pool && !cancelled())
+        {
+            m_pool = FindFlatNameArray();
+            m_legacyNames = m_flatNames = m_pool != 0;
+        }
+        if (!m_pool && !cancelled())
         {
             m_legacyNames = false;
             m_pool = FindNamePool();
@@ -162,11 +175,12 @@ namespace Manifold::Target
         {
             m_pool = FindNameEntryArray();
             m_legacyNames = m_pool != 0;
+            m_flatNames = m_pool && IsFlatNameArray(m_pool);
         }
         if (cancelled())
             return fail("cancelled");
         if (!m_pool)
-            return fail("name table not found: neither FNamePool (UE 4.23+) nor TNameEntryArray (UE 4.22 and older)");
+            return fail("name table not found: neither FNamePool (UE 4.23+), TNameEntryArray (UE 4.22 and older) nor GNames (UE3)");
         stages.Mark("names");
 
         step("Finding the object array");
@@ -249,6 +263,7 @@ namespace Manifold::Target
         m_summary = UnrealSummary{};
         m_summary.NamePool = m_pool;
         m_summary.LegacyNames = m_legacyNames;
+        m_summary.FlatNames = m_flatNames;
         m_summary.Objects = m_array;
         m_summary.ObjectsSource = source;
         m_summary.ObjectCount = Count();
@@ -258,7 +273,7 @@ namespace Manifold::Target
         m_summary.Layout = m_layout;
         const UnrealLayout& l = m_layout;
         LOG_INFO("Unreal", Format("%s at %s (%s) | GObjects at %s (%s) | %d objects, %zu types | %.1f s (%s)", m_legacyNames ? "GNames" : "FNamePool",
-            Hex(m_pool).c_str(), m_legacyNames ? "pre-4.23" : "4.23+", Hex(m_array).c_str(), source.c_str(), m_summary.ObjectCount, m_summary.TypeCount,
+            Hex(m_pool).c_str(), m_layout.Ue3 ? "UE3" : m_legacyNames ? "pre-4.23" : "4.23+", Hex(m_array).c_str(), source.c_str(), m_summary.ObjectCount, m_summary.TypeCount,
             m_summary.Seconds, m_summary.Timings.c_str()));
         LOG_INFO("Unreal", Format("UObject index %X class %X name %X outer %X | Super %X Properties %X Name %X Next %X Offset %X Size %X Extra %s | %s fields, %s vectors",
             l.Index, l.Class, l.Name, l.Outer, l.Super, l.ChildProperties, l.FieldName, l.Next, l.Offset, l.Size, l.Extra >= 0 ? Hex(static_cast<std::uint64_t>(l.Extra)).c_str() : "-",
@@ -349,7 +364,22 @@ namespace Manifold::Target
         const int extra = m_layout.Extra;
         if (extra < 0)
             return info;
-        if (kind == "BoolProperty")
+        if (kind == "BoolProperty" && m_layout.Ue3)
+        {
+            // ∑ UE3 UBoolProperty: one 32-bit BitMask over a 32-bit field; as byte offset and byte mask for the rest.
+            const auto mask = block ? From<std::uint32_t>(block, extra) : ReadUInt(property + static_cast<std::uint64_t>(extra));
+            if (mask && *mask != 0)
+            {
+                unsigned bit = 0;
+                while (!((*mask >> bit) & 1u))
+                    ++bit;
+                info.Bitfield = true;
+                info.ByteOffset = static_cast<int>(bit / 8);
+                info.Mask = static_cast<std::uint8_t>(1u << (bit % 8));
+                info.FieldMask = info.Mask;
+            }
+        }
+        else if (kind == "BoolProperty")
         {
             std::uint8_t bits[4] = {};
             bool got = false;
@@ -596,7 +626,10 @@ namespace Manifold::Target
                 }
                 return max || shared;
             };
-        for (std::uint64_t offset = m_pointer == 8 ? 0x28 : 0x1C; offset <= 0x80; offset += pointer)
+        // ∑ UE3's UEnum is UField + TArray<FName> Names, so the stride is 8 and the value is the position. Wider strides
+        //   could read past the array and still decode ("None" for zeros), so UE3 only tries 8.
+        const std::initializer_list<int> strides = m_layout.Ue3 ? std::initializer_list<int>{ 8 } : std::initializer_list<int>{ 16, 12, 8 };
+        for (std::uint64_t offset = m_pointer == 8 ? 0x28 : 0x1C; offset <= 0xA0; offset += pointer)
         {
             const std::uint64_t data = ReadObject(enumObject + offset);
             const auto count = ReadInt(enumObject + offset + pointer);
@@ -604,7 +637,7 @@ namespace Manifold::Target
             if (!data || !count || !max || *count <= 0 || *count > 4096 || *max < *count)
                 continue;
             int stride = 0;
-            for (const int candidate : { 16, 12, 8 })
+            for (const int candidate : strides)
             {
                 if (names(data, static_cast<std::uint64_t>(candidate), *count))
                 {
@@ -629,7 +662,7 @@ namespace Manifold::Target
         // ∑ UE 5.7 (KLETKA) keeps the names and the values in two arrays, each pointer tagged in its low bit,
         //   followed by one int32 count: [names | 1][values | 1][count].
         const std::uint64_t untag = ~static_cast<std::uint64_t>(m_pointer - 1);
-        for (std::uint64_t offset = m_pointer == 8 ? 0x28 : 0x1C; entries.empty() && offset <= 0x80; offset += pointer)
+        for (std::uint64_t offset = m_pointer == 8 ? 0x28 : 0x1C; entries.empty() && !m_layout.Ue3 && offset <= 0x80; offset += pointer)
         {
             const std::uint64_t nameArray = ReadPointer(enumObject + offset).value_or(0) & untag;
             const std::uint64_t values = ReadPointer(enumObject + offset + pointer).value_or(0) & untag;
@@ -793,6 +826,14 @@ namespace Manifold::Target
         return std::nullopt;
     }
 
+    UnrealHeaderNames UnrealRuntime::HeaderNames() const
+    {
+        // ∑ The member names of the engine's own UObject declaration (UE3 Object.uc / UnObjBas.h, UE4 UObjectBase).
+        if (m_layout.Ue3)
+            return { "VfTableObject", "ObjectInternalInteger", "Class", "Name", "Outer" };
+        return { "VTable", "InternalIndex", "ClassPrivate", "NamePrivate", "OuterPrivate" };
+    }
+
     std::optional<std::string> UnrealRuntime::HeaderField(int offset, int& inside) const
     {
         struct Slot
@@ -801,9 +842,10 @@ namespace Manifold::Target
             int Width;
             const char* Name;
         };
-        std::vector<Slot> slots = { { 0, m_pointer, "VTable" }, { m_layout.Index, 4, "InternalIndex" }, { m_layout.Class, m_pointer, "ClassPrivate" },
-            { m_layout.Name, 8, "NamePrivate" }, { m_layout.Outer, m_pointer, "OuterPrivate" } };
-        if (m_layout.Index == m_pointer + 4)
+        const UnrealHeaderNames names = HeaderNames();
+        std::vector<Slot> slots = { { 0, m_pointer, names.VTable }, { m_layout.Index, 4, names.Index }, { m_layout.Class, m_pointer, names.Class },
+            { m_layout.Name, 8, names.Name }, { m_layout.Outer, m_pointer, names.Outer } };
+        if (!m_layout.Ue3 && m_layout.Index == m_pointer + 4)
             slots.push_back({ m_pointer, 4, "ObjectFlags" });
         for (const Slot& slot : slots)
         {
@@ -922,11 +964,17 @@ namespace Manifold::Target
 
     std::uint64_t UnrealRuntime::World() const
     {
+        // ∑ UE3 has no UWorld property path from the engine; the controller's WorldInfo is the reflected stand-in.
+        if (m_layout.Ue3)
+            return Follow(Controller(), { "WorldInfo" });
         return Follow(Engine(), { "GameViewport", "World" });
     }
 
     std::uint64_t UnrealRuntime::Controller() const
     {
+        // ∑ UE3: UGameEngine::GamePlayers (TArray<ULocalPlayer*>), ULocalPlayer::Actor is the APlayerController.
+        if (m_layout.Ue3)
+            return Follow(Engine(), kControllerPathUe3);
         return Follow(Engine(), kControllerPath);
     }
 

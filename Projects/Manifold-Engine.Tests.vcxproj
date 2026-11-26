@@ -326,6 +326,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClInclude Include="..\Tests\Target\FakeIl2CppScene.h" />
     <ClInclude Include="..\Tests\Target\FakeRtti.h" />
     <ClInclude Include="..\Tests\Target\FakeUnreal.h" />
+    <ClInclude Include="..\Tests\Target\FakeUnreal3.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="Dependencies.vcxproj">

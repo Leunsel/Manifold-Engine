@@ -262,6 +262,7 @@ namespace Manifold::Lua
                 lua_pushnumber(state, summary.Seconds);
                 lua_setfield(state, -2, "seconds");
                 SetBoolean(state, "doubleVectors", summary.Layout.Component == 8);
+                SetBoolean(state, "ue3", summary.Layout.Ue3);
             }
             return 1;
         }
@@ -395,6 +396,7 @@ namespace Manifold::Lua
                     SetInteger(state, "super", l.Super);
                     SetInteger(state, "childProperties", l.ChildProperties);
                     SetInteger(state, "structSize", l.StructSize);
+                    SetBoolean(state, "structSize16", l.StructSize16);
                     SetInteger(state, "children", l.Children);
                     SetInteger(state, "childNext", l.ChildNext);
                     SetInteger(state, "functionFlags", l.FunctionFlags);
@@ -406,6 +408,7 @@ namespace Manifold::Lua
                     SetInteger(state, "size", l.Size);
                     SetInteger(state, "extra", l.Extra);
                     SetInteger(state, "component", l.Component);
+                    SetBoolean(state, "ue3", l.Ue3);
                     return 1;
                 });
         }

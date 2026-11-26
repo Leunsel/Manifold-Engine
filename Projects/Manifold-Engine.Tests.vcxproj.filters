@@ -699,5 +699,8 @@
     <ClInclude Include="..\Tests\Target\FakeUnreal.h">
       <Filter>Tests\Target</Filter>
     </ClInclude>
+    <ClInclude Include="..\Tests\Target\FakeUnreal3.h">
+      <Filter>Tests\Target</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

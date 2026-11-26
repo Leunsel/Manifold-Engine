@@ -1,6 +1,7 @@
 #include "FakeClr.h"
 #include "FakeRtti.h"
 #include "FakeUnreal.h"
+#include "FakeUnreal3.h"
 
 #include <windows.h>
 
@@ -970,6 +971,7 @@ struct UnrealMarker
 };
 
 extern "C" __declspec(dllexport) FakeUnreal::Image g_unrealFake = {};
+extern "C" __declspec(dllexport) FakeUnreal3::Image g_unreal3Fake = {};
 struct SpeedProbe
 {
     volatile unsigned long long Sequence;
@@ -1320,6 +1322,13 @@ int main(int argc, char** argv)
             static FakeUnreal::Builder unreal;
             if (unreal.Build())
                 g_unrealFake = unreal.Fake;
+        }
+        else if (std::strcmp(argv[i], "--unreal3") == 0 || std::strcmp(argv[i], "--unreal3-early") == 0)
+        {
+            // On the heap: a static builder's own pointer members in .data look like a TArray to the search.
+            static FakeUnreal3::Builder* unreal3 = new FakeUnreal3::Builder();
+            if (unreal3->Build(std::strcmp(argv[i], "--unreal3-early") == 0))
+                g_unreal3Fake = unreal3->Fake;
         }
         else if (std::strcmp(argv[i], "--il2cpp-scene") == 0)
             g_scene = true;

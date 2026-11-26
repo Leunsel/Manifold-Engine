@@ -69,6 +69,7 @@ namespace Manifold::Target
         int Super = -1;
         int ChildProperties = -1;
         int StructSize = -1;
+        bool StructSize16 = false;
         int Children = -1;
         int ChildNext = -1;
         int FunctionFlags = -1;
@@ -80,6 +81,18 @@ namespace Manifold::Target
         int Size = -1;
         int Component = 4;
         int Extra = -1;
+        // ∑ Unreal Engine 3: the core package is "Core" (not "/Script/CoreUObject"), UClass derives from UState,
+        //   a BoolProperty holds a 32-bit BitMask and an enum is a plain TArray<FName>.
+        bool Ue3 = false;
+    };
+
+    struct UnrealHeaderNames
+    {
+        const char* VTable;
+        const char* Index;
+        const char* Class;
+        const char* Name;
+        const char* Outer;
     };
 
     enum class UnrealKind
@@ -167,6 +180,7 @@ namespace Manifold::Target
     {
         std::uint64_t NamePool = 0;
         bool LegacyNames = false;
+        bool FlatNames = false;
         std::uint64_t Objects = 0;
         std::string ObjectsSource;
         int ObjectCount = 0;
@@ -231,6 +245,7 @@ namespace Manifold::Target
         std::optional<UnrealLocation> Locate(std::uint64_t address) const;
         std::optional<std::string> Whois(std::uint64_t address) const;
         std::optional<std::string> HeaderField(int offset, int& inside) const;
+        UnrealHeaderNames HeaderNames() const;
 
         std::uint64_t FindEngine() const;
         std::uint64_t Engine() const;
@@ -273,12 +288,15 @@ namespace Manifold::Target
         bool InImage(std::uint64_t address) const;
         std::vector<std::pair<std::uint64_t, std::uint64_t>> WritableSections(const ModuleInfo& image) const;
 
+        std::uint64_t ReadEntry(std::uint64_t address) const;
         std::optional<std::string> PoolEntry(std::uint64_t entry) const;
         std::optional<std::string> LegacyEntry(std::uint64_t entry, int indexAt, int nameAt) const;
         std::uint64_t NamePoolAmong(const std::vector<std::uint64_t>& slots) const;
         std::uint64_t FindNamePool() const;
         bool IsNameEntryArray(std::uint64_t chunks, int nameAt);
+        bool IsFlatNameArray(std::uint64_t array) const;
         std::uint64_t FindNameEntryArray();
+        std::uint64_t FindFlatNameArray();
         std::uint64_t PatternTarget(const UnrealPattern& pattern) const;
         bool CheckNamePool(std::uint64_t pool, bool legacy);
 
@@ -326,6 +344,9 @@ namespace Manifold::Target
         UnrealSummary m_summary;
         std::uint64_t m_pool = 0;
         bool m_legacyNames = false;
+        bool m_flatNames = false;
+        int m_legacyShift = 1;
+        int m_legacyWide = -1;
         int m_legacyIndexAt = 0;
         int m_legacyNameAt = 0;
         std::uint64_t m_array = 0;

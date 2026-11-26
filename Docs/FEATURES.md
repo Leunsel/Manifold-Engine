@@ -850,11 +850,13 @@ They work for IL2CPP too. An IL2CPP game cannot load a managed assembly, so a sm
 
 ## Unreal Engine
 
-Unreal Engine 4 and 5 games, 64-bit and 32-bit, are read without an SDK, game offsets or signatures.
+Unreal Engine 3, 4 and 5 games, 64-bit and 32-bit, are read without an SDK, game offsets or signatures.
 
 ### Finding the engine
 
-The name table (FNamePool, or TNameEntryArray before 4.23), the object array and the reflection layout are found in the running game, read-only, in about a second, by itself when an Unreal game is opened.
+The name table (FNamePool, TNameEntryArray before 4.23, or the GNames array in Unreal Engine 3), the object array and the reflection layout are found in the running game, read-only, in about a second, by itself when an Unreal game is opened.
+
+In an Unreal Engine 3 game the player is found through the engine's GamePlayers list, the world through the controller's WorldInfo, and the dissect uses the engine's own header names (Class, Name, Outer).
 
 ### In Structure Dissect
 

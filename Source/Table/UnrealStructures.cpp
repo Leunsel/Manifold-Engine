@@ -298,13 +298,31 @@ namespace Manifold::Table
             void Header()
             {
                 const Target::UnrealLayout& l = m_runtime.Layout();
-                Add(0, "VTable", ValueType::Pointer, m_pointer);
-                if (l.Index == m_pointer + 4)
-                    Add(m_pointer, "ObjectFlags", ValueType::FourBytes, 4, FieldDisplay::Hex);
-                Add(l.Index, "InternalIndex", ValueType::FourBytes, 4, FieldDisplay::Signed);
-                Add(l.Class, "ClassPrivate", ValueType::Pointer, m_pointer);
-                Add(l.Name, "NamePrivate", m_custom ? ValueType::ByteArray : ValueType::EightBytes, 8, FieldDisplay::Hex, Target::kUnrealFNameType);
-                Add(l.Outer, "OuterPrivate", ValueType::Pointer, m_pointer);
+                const Target::UnrealHeaderNames names = m_runtime.HeaderNames();
+                // ∑ UE3's Object.uc declares the header itself (VfTableObject, ObjectFlags, Outer, Name, Class ...) as
+                //   script properties; where the reflection has a field, it is not added a second time.
+                std::vector<std::pair<int, int>> reflected;
+                if (l.Ue3)
+                {
+                    for (const Target::UnrealField& f : m_runtime.Fields(m_runtime.Type("Object"), true))
+                        reflected.push_back({ f.Start(), std::max(1, f.Size * std::max(1, f.Dim)) });
+                }
+                const auto add = [&](int offset, const char* name, ValueType type, int width, FieldDisplay display = FieldDisplay::Unsigned, std::string custom = {})
+                    {
+                        for (const auto& [start, size] : reflected)
+                        {
+                            if (offset < start + size && start < offset + width)
+                                return;
+                        }
+                        Add(offset, name, type, width, display, std::move(custom));
+                    };
+                add(0, names.VTable, ValueType::Pointer, m_pointer);
+                if (!l.Ue3 && l.Index == m_pointer + 4)
+                    add(m_pointer, "ObjectFlags", ValueType::FourBytes, 4, FieldDisplay::Hex);
+                add(l.Index, names.Index, ValueType::FourBytes, 4, FieldDisplay::Signed);
+                add(l.Class, names.Class, ValueType::Pointer, m_pointer);
+                add(l.Name, names.Name, m_custom ? ValueType::ByteArray : ValueType::EightBytes, 8, FieldDisplay::Hex, Target::kUnrealFNameType);
+                add(l.Outer, names.Outer, ValueType::Pointer, m_pointer);
             }
 
             std::vector<StructField> Flush()

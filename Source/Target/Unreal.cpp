@@ -35,6 +35,17 @@ namespace Manifold::Target
         constexpr std::uint32_t kFuncBlueprintEvent = 0x08000000;
         constexpr const char* kCoreUObjectUtf16 = "2F 00 53 00 63 00 72 00 69 00 70 00 74 00 2F 00 43 00 6F 00 72 00 65 00 55 00 4F 00 62 00 6A 00 65 00 63 00 74 00";
         constexpr const char* kNoneByteProperty = "4E 6F 6E 65 ?? ?? 42 79 74 65 50 72 6F 70 65 72 74 79";
+        // ∑ UTF-16 "Engine.GameEngine": every UE3 exe we swept (package versions 536 .. 882) has it as an ini section
+        //   name; UE4/5 have it inside "/Script/Engine.GameEngine". Not every UE3 game has a Binaries\Win32 folder.
+        constexpr const char* kGameEngineUtf16 = "45 00 6E 00 67 00 69 00 6E 00 65 00 2E 00 47 00 61 00 6D 00 65 00 45 00 6E 00 67 00 69 00 6E 00 65 00";
+        // ∑ UE4 keeps NamePrivate below 0x40; UE3 x64 has it near 0x48..0x50 and the index near 0x38..0x40.
+        constexpr std::size_t kHeaderPeek = 0x90;
+        constexpr std::size_t kHeaderPeekShort = 0x48;
+        // ∑ Where FNameEntry keeps its text: UE4 before 4.23 at 0x10/0x0C/0x08, UE3 after {Flags, Index, HashNext}
+        //   at 0x10 (x86) or 0x18 (x64), or after {Index, HashNext} in the oldest builds.
+        constexpr int kLegacyNameOffsets[] = { 0x10, 0x0C, 0x08, 0x18, 0x14, 0x1C, 0x20 };
+        constexpr int kMinFlatNames = 0x100;
+        constexpr int kMaxFlatNames = 0x4000000;
 
         bool EndsWith(std::string_view text, std::string_view tail)
         {
@@ -77,12 +88,16 @@ namespace Manifold::Target
             ArrayLayout(true, 0x18, 0x10, 0x00, 0x14, 0x20),
             ArrayLayout(true, 0x18, 0x00, 0x14, 0x10, 0x04),
             ArrayLayout(false, 0x00, 0x08, 0x0C, 0, 0),
+            ArrayLayout(false, 0x00, 0x0C, 0x08, 0, 0),
         };
 
+        // ∑ The last entry per pointer size is UE3's TArray<UObject*> {Data, ArrayNum, ArrayMax}; the one before is
+        //   UE4's FFixedUObjectArray {Objects, MaxElements, NumElements}.
         const UnrealLayout kArrayLayouts32[] = {
             ArrayLayout(true, 0x00, 0x08, 0x0C, 0x10, 0x14),
             ArrayLayout(true, 0x10, 0x00, 0x04, 0x08, 0x0C),
             ArrayLayout(false, 0x00, 0x04, 0x08, 0, 0),
+            ArrayLayout(false, 0x00, 0x08, 0x04, 0, 0),
         };
 
         const int kItemSizes[] = { 0x18, 0x10, 0x20, 0x28, 0x30 };
@@ -311,11 +326,16 @@ namespace Manifold::Target
                     return true;
             }
         }
-        const auto pattern = Scan::ParsePattern(kCoreUObjectUtf16);
-        if (!pattern)
-            return false;
-        Scan::PatternFilter filter;
-        return !Scan::FindPattern(process, *pattern, main->Base, main->Base + main->Size, filter, 1).empty();
+        for (const char* marker : { kCoreUObjectUtf16, kGameEngineUtf16 })
+        {
+            const auto pattern = Scan::ParsePattern(marker);
+            if (!pattern)
+                continue;
+            Scan::PatternFilter filter;
+            if (!Scan::FindPattern(process, *pattern, main->Base, main->Base + main->Size, filter, 1).empty())
+                return true;
+        }
+        return false;
     }
 
     std::optional<std::string> UnrealRuntime::PoolEntry(std::uint64_t entry) const
@@ -350,7 +370,8 @@ namespace Manifold::Target
         const auto index = ReadUInt(entry + static_cast<std::uint64_t>(indexAt));
         if (!index)
             return std::nullopt;
-        const auto text = (*index & 1) ? ReadWide(entry + static_cast<std::uint64_t>(nameAt), kNameMaxLength) : ReadText(entry + static_cast<std::uint64_t>(nameAt), kNameMaxLength);
+        const bool wide = m_legacyWide < 0 ? (*index & 1) != 0 : m_legacyWide == 1;
+        const auto text = wide ? ReadWide(entry + static_cast<std::uint64_t>(nameAt), kNameMaxLength) : ReadText(entry + static_cast<std::uint64_t>(nameAt), kNameMaxLength);
         if (!text || text->empty())
             return std::nullopt;
         return text;
@@ -387,6 +408,18 @@ namespace Manifold::Target
                 m_blocks[block] = base;
             }
             text = PoolEntry(base + static_cast<std::uint64_t>(index & 0xFFFF) * 2);
+        }
+        else if (m_flatNames)
+        {
+            // ∑ UE3 keeps TArray<FNameEntry*> {Data, Num, Max}. Data moves when the array grows, so it is read
+            //   every time instead of cached; decoded names are cached above anyway.
+            const auto count = ReadInt(m_pool + static_cast<std::uint64_t>(m_pointer));
+            const std::uint64_t data = ReadObject(m_pool);
+            if (!count || index >= static_cast<std::uint32_t>(std::max(*count, 0)) || !data)
+                return std::nullopt;
+            const auto entry = ReadPointer(data + static_cast<std::uint64_t>(index) * static_cast<std::uint64_t>(m_pointer));
+            if (entry)
+                text = LegacyEntry(*entry, m_legacyIndexAt, m_legacyNameAt);
         }
         else
         {
@@ -525,6 +558,16 @@ namespace Manifold::Target
         return 0;
     }
 
+    std::uint64_t UnrealRuntime::ReadEntry(std::uint64_t address) const
+    {
+        // ∑ Some UE3 x64 builds pack their FNameEntry records byte by byte: {Index, HashNext, Name} with the
+        //   entries at odd addresses, so an entry pointer has a range but no alignment.
+        const auto value = ReadPointer(address);
+        if (!value || *value < kPointerMin || *value > (m_pointer == 8 ? kPointerMax : kPointerMax32))
+            return 0;
+        return *value;
+    }
+
     bool UnrealRuntime::IsNameEntryArray(std::uint64_t chunks, int nameAt)
     {
         const std::uint64_t chunk = ReadObject(chunks);
@@ -533,20 +576,39 @@ namespace Manifold::Target
         std::uint64_t entries[3] = {};
         for (int i = 0; i < 3; ++i)
         {
-            entries[i] = ReadObject(chunk + static_cast<std::uint64_t>(i) * static_cast<std::uint64_t>(m_pointer));
+            entries[i] = ReadEntry(chunk + static_cast<std::uint64_t>(i) * static_cast<std::uint64_t>(m_pointer));
             if (!entries[i])
                 return false;
         }
+        // ∑ Usually Index = (index << 1) | wide. Early UE3 Unicode builds (package 536) store the index as
+        //   is and every name is UTF-16, so shift 0 tries both fixed widths.
+        struct Rule
+        {
+            int Shift;
+            int Wide;
+        };
+        const Rule rules[] = { { 1, -1 }, { 0, 1 }, { 0, 0 } };
+        const int shift = m_legacyShift;
+        const int wide = m_legacyWide;
         for (int indexAt = 0; indexAt <= nameAt - 4; indexAt += 4)
         {
-            bool matches = true;
-            for (int slot = 0; slot < 3 && matches; ++slot)
-                matches = ReadUInt(entries[slot] + static_cast<std::uint64_t>(indexAt)) == static_cast<std::uint32_t>(slot << 1);
-            if (matches && LegacyEntry(entries[1], indexAt, nameAt) == "ByteProperty" && LegacyEntry(entries[2], indexAt, nameAt) == "IntProperty")
+            for (const Rule& rule : rules)
             {
-                m_legacyIndexAt = indexAt;
-                m_legacyNameAt = nameAt;
-                return true;
+                bool matches = true;
+                for (int slot = 0; slot < 3 && matches; ++slot)
+                    matches = ReadUInt(entries[slot] + static_cast<std::uint64_t>(indexAt)) == static_cast<std::uint32_t>(slot << rule.Shift);
+                if (!matches)
+                    continue;
+                m_legacyShift = rule.Shift;
+                m_legacyWide = rule.Wide;
+                if (LegacyEntry(entries[1], indexAt, nameAt) == "ByteProperty" && LegacyEntry(entries[2], indexAt, nameAt) == "IntProperty")
+                {
+                    m_legacyIndexAt = indexAt;
+                    m_legacyNameAt = nameAt;
+                    return true;
+                }
+                m_legacyShift = shift;
+                m_legacyWide = wide;
             }
         }
         return false;
@@ -573,6 +635,88 @@ namespace Manifold::Target
             }
         }
         return 0;
+    }
+
+    bool UnrealRuntime::IsFlatNameArray(std::uint64_t array) const
+    {
+        // ∑ Needs m_legacyIndexAt/m_legacyNameAt from IsNameEntryArray. A chunked TNameEntryArray has Chunks[1] where a
+        //   flat TArray has {Num, Max}; past 0x4000 names the entry at Data[0x4000] must carry its own index (<< 1),
+        //   which a chunk of 0x4000 entry pointers never does.
+        const std::uint64_t pointer = static_cast<std::uint64_t>(m_pointer);
+        const auto num = ReadInt(array + pointer);
+        const auto max = ReadInt(array + pointer + 4);
+        const std::uint64_t data = ReadObject(array);
+        if (!num || !max || !data || *num < 3 || *max < *num || *max > kMaxFlatNames)
+            return false;
+        if (*num <= static_cast<std::int32_t>(kLegacyPerChunk))
+            return true;
+        const std::uint64_t entry = ReadEntry(data + kLegacyPerChunk * pointer);
+        const auto index = entry ? ReadUInt(entry + static_cast<std::uint64_t>(m_legacyIndexAt)) : std::nullopt;
+        return index && (*index >> m_legacyShift) == kLegacyPerChunk;
+    }
+
+    std::uint64_t UnrealRuntime::FindFlatNameArray()
+    {
+        if (!m_main.Size)
+            return 0;
+        std::vector<std::uint8_t> data;
+        const std::size_t stride = static_cast<std::size_t>(m_pointer);
+        const std::size_t span = stride + 8;
+        // ∑ A struct that holds the same Data pointer next to two unrelated ints also passes; the real array's last
+        //   entry carries its own index, so such a match only stands in when nothing better is found.
+        std::uint64_t fallback = 0;
+        int fallbackIndexAt = 0;
+        int fallbackNameAt = 0;
+        int fallbackShift = 1;
+        int fallbackWide = -1;
+        const auto lastFits = [&](std::uint64_t array, std::uint64_t items, std::int32_t num)
+            {
+                const std::uint64_t entry = ReadEntry(items + static_cast<std::uint64_t>(num - 1) * stride);
+                const auto index = entry ? ReadUInt(entry + static_cast<std::uint64_t>(m_legacyIndexAt)) : std::nullopt;
+                return array && index && (*index >> m_legacyShift) == static_cast<std::uint32_t>(num - 1);
+            };
+        for (const auto& [from, size] : WritableSections(m_main))
+        {
+            const std::uint64_t stop = from + size;
+            for (std::uint64_t at = from; at + span <= stop && !Cancelled(); at += kSectionStep)
+            {
+                const std::size_t length = static_cast<std::size_t>(std::min<std::uint64_t>(kSectionStep + span, stop - at));
+                data.resize(length);
+                const std::size_t got = m_process->Read(at, data.data(), length);
+                if (got < span)
+                    continue;
+                const std::size_t last = std::min<std::size_t>(static_cast<std::size_t>(kSectionStep), got - span);
+                for (std::size_t pos = (stride - (at % stride)) % stride; pos <= last; pos += stride)
+                {
+                    const std::uint64_t items = PointerIn(data.data(), pos);
+                    const std::int32_t num = Get<std::int32_t>(data.data(), pos + stride);
+                    const std::int32_t max = Get<std::int32_t>(data.data(), pos + stride + 4);
+                    if (!IsPtr(items) || InImage(items) || num < kMinFlatNames || max < num || max > kMaxFlatNames)
+                        continue;
+                    for (const int nameAt : kLegacyNameOffsets)
+                    {
+                        if (!IsNameEntryArray(at + pos, nameAt) || !IsFlatNameArray(at + pos))
+                            continue;
+                        if (lastFits(at + pos, items, num))
+                            return at + pos;
+                        if (!fallback)
+                        {
+                            fallback = at + pos;
+                            fallbackIndexAt = m_legacyIndexAt;
+                            fallbackNameAt = m_legacyNameAt;
+                            fallbackShift = m_legacyShift;
+                            fallbackWide = m_legacyWide;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        m_legacyIndexAt = fallbackIndexAt;
+        m_legacyNameAt = fallbackNameAt;
+        m_legacyShift = fallbackShift;
+        m_legacyWide = fallbackWide;
+        return fallback;
     }
 
     std::uint64_t UnrealRuntime::PatternTarget(const UnrealPattern& pattern) const
@@ -618,7 +762,7 @@ namespace Manifold::Target
             const auto text = ReadText(block + 2, 4);
             return header && (*header >> 6) == 4 && text == "None";
         }
-        for (const int nameAt : { 0x10, 0x0C, 0x08 })
+        for (const int nameAt : kLegacyNameOffsets)
         {
             if (IsNameEntryArray(pool, nameAt))
                 return true;
@@ -665,7 +809,14 @@ namespace Manifold::Target
                 cache[object] = known;
                 return known;
             };
+        // ∑ UE3's GObjObjects is a flat TArray<UObject*>, so its item is one pointer. It goes first for a flat array:
+        //   with 0x18 items a TArray of pointers would also pass (every third object) and then fail the index probe.
+        std::vector<int> sizes;
+        if (!layout.Chunked)
+            sizes.push_back(m_pointer);
         for (const int size : m_pointer == 8 ? std::span<const int>(kItemSizes) : std::span<const int>(kItemSizes32))
+            sizes.push_back(size);
+        for (const int size : sizes)
         {
             for (int offset = 0; offset <= std::min(28, size - m_pointer); offset += 4)
             {
@@ -704,7 +855,8 @@ namespace Manifold::Target
         {
             const std::uint64_t object = PointerIn(raw.data(), static_cast<std::size_t>(i * live.Layout.ItemSize + live.Layout.ItemOffset));
             live.First[static_cast<std::size_t>(i)] = object;
-            if (IsPtr(object) && !ReadBlock(object, live.Headers[static_cast<std::size_t>(i)], 0x48))
+            if (IsPtr(object) && !ReadBlock(object, live.Headers[static_cast<std::size_t>(i)], kHeaderPeek) &&
+                !ReadBlock(object, live.Headers[static_cast<std::size_t>(i)], kHeaderPeekShort))
                 live.Headers[static_cast<std::size_t>(i)].clear();
             if (!IsPtr(object))
                 live.Headers[static_cast<std::size_t>(i)].clear();
@@ -738,7 +890,10 @@ namespace Manifold::Target
             return std::nullopt;
         if (const auto index = Override("index"))
             live.Layout.Index = *index;
-        for (const int offset : { 0x0C, 0x08, 0x10, 0x14, 0x04, 0x18, 0x1C, 0x20 })
+        std::vector<int> indexAt{ 0x0C, 0x08, 0x10, 0x14, 0x04, 0x18, 0x1C, 0x20 };
+        for (int offset = 0x24; offset <= 0x60; offset += 4)
+            indexAt.push_back(offset);
+        for (const int offset : indexAt)
         {
             if (live.Layout.Index >= 0)
                 break;
@@ -758,7 +913,7 @@ namespace Manifold::Target
         if (live.Layout.Index < 0)
             return std::nullopt;
         std::vector<int> candidates{ 0x18 };
-        for (int offset = 0x08; offset <= 0x40; offset += 4)
+        for (int offset = 0x08; offset <= 0x70; offset += 4)
             candidates.push_back(offset);
         if (const auto name = Override("name"))
             candidates = { *name };
@@ -775,7 +930,7 @@ namespace Manifold::Target
                 if (!name)
                     continue;
                 ++decoded;
-                anchor = anchor || *name == "/Script/CoreUObject" || *name == "Object";
+                anchor = anchor || *name == "/Script/CoreUObject" || *name == "Object" || *name == "Core";
                 seen.insert(*name);
             }
             if ((anchor && decoded >= 58 && static_cast<int>(seen.size()) * 4 >= decoded * 3) || Override("name"))
@@ -991,6 +1146,7 @@ namespace Manifold::Target
     {
         std::uint64_t objectClass = 0;
         std::uint64_t package = 0;
+        std::uint64_t ue3Package = 0;
         for (int i = 0; i < 64; ++i)
         {
             const auto name = HeaderName(live, i, m_layout.Name);
@@ -998,21 +1154,30 @@ namespace Manifold::Target
                 objectClass = live.First[static_cast<std::size_t>(i)];
             if (name == "/Script/CoreUObject" && !package)
                 package = live.First[static_cast<std::size_t>(i)];
+            if (name == "Core" && !ue3Package)
+                ue3Package = live.First[static_cast<std::size_t>(i)];
         }
-        if (!objectClass || !package)
+        if (!package && ue3Package)
+            package = ue3Package;
+        if (!objectClass)
             return false;
+        const auto nameOf = [&](std::uint64_t object) { return object ? NameAt(object + static_cast<std::uint64_t>(m_layout.Name)) : std::nullopt; };
         if (m_layout.Class < 0)
         {
-            const std::initializer_list<int> wide = { 0x10, 0x08, 0x18, 0x20, 0x28, 0x30, 0x38 };
-            const std::initializer_list<int> narrow = { 0x0C, 0x04, 0x08, 0x10, 0x14, 0x18, 0x1C, 0x20, 0x24 };
+            const std::initializer_list<int> wide = { 0x10, 0x08, 0x18, 0x20, 0x28, 0x30, 0x38, 0x40, 0x48, 0x50, 0x58, 0x60 };
+            const std::initializer_list<int> narrow = { 0x0C, 0x04, 0x08, 0x10, 0x14, 0x18, 0x1C, 0x20, 0x24, 0x28, 0x2C, 0x30, 0x34, 0x38, 0x3C };
             for (const int offset : m_pointer == 8 ? wide : narrow)
             {
                 if (Overlaps(offset, m_pointer, m_layout.Name, 8) || Overlaps(offset, m_pointer, m_layout.Index, 4))
                     continue;
-                const std::uint64_t meta = ReadObject(objectClass + static_cast<std::uint64_t>(offset));
-                const std::uint64_t packageMeta = ReadObject(package + static_cast<std::uint64_t>(offset));
-                if (meta && packageMeta && NameAt(meta + static_cast<std::uint64_t>(m_layout.Name)) == "Class" &&
-                    NameAt(packageMeta + static_cast<std::uint64_t>(m_layout.Name)) == "Package")
+                const auto at = static_cast<std::uint64_t>(offset);
+                const std::uint64_t meta = ReadObject(objectClass + at);
+                if (nameOf(meta) != "Class")
+                    continue;
+                // ∑ With the package at hand its class must be "Package"; without it (a UE3 game can keep its Core
+                //   package far behind the first 64 objects) the class of "Class" must be "Class" itself.
+                const bool confirmed = package ? nameOf(ReadObject(package + at)) == "Package" : ReadObject(meta + at) == meta;
+                if (confirmed)
                 {
                     m_layout.Class = offset;
                     break;
@@ -1023,18 +1188,28 @@ namespace Manifold::Target
             return false;
         if (m_layout.Outer < 0)
         {
-            const std::initializer_list<int> wide = { 0x20, 0x28, 0x18, 0x10, 0x30, 0x38, 0x40 };
-            const std::initializer_list<int> narrow = { 0x18, 0x1C, 0x14, 0x10, 0x0C, 0x08, 0x04, 0x20, 0x24, 0x28 };
+            const std::initializer_list<int> wide = { 0x20, 0x28, 0x18, 0x10, 0x30, 0x38, 0x40, 0x48, 0x50, 0x58, 0x60 };
+            const std::initializer_list<int> narrow = { 0x18, 0x1C, 0x14, 0x10, 0x0C, 0x08, 0x04, 0x20, 0x24, 0x28, 0x2C, 0x30, 0x34, 0x38, 0x3C };
             for (const int offset : m_pointer == 8 ? wide : narrow)
             {
-                if (!Overlaps(offset, m_pointer, m_layout.Name, 8) && offset != m_layout.Class && ReadPointer(objectClass + static_cast<std::uint64_t>(offset)) == package)
+                if (Overlaps(offset, m_pointer, m_layout.Name, 8) || offset == m_layout.Class)
+                    continue;
+                const std::uint64_t outer = ReadObject(objectClass + static_cast<std::uint64_t>(offset));
+                if (package ? outer == package
+                            : outer && (nameOf(outer) == "Core" || nameOf(outer) == "/Script/CoreUObject") &&
+                                  nameOf(ReadObject(outer + static_cast<std::uint64_t>(m_layout.Class))) == "Package")
                 {
                     m_layout.Outer = offset;
+                    package = outer;
                     break;
                 }
             }
         }
-        return m_layout.Outer >= 0;
+        if (m_layout.Outer < 0)
+            return false;
+        if (!Override("ue3") && !m_layout.Ue3 && nameOf(OuterOf(objectClass)) == "Core")
+            m_layout.Ue3 = true;
+        return true;
     }
 
     UnrealKind UnrealRuntime::KindOf(std::uint64_t meta) const
@@ -1162,9 +1337,9 @@ namespace Manifold::Target
             outer = up;
         }
         const std::string package = NameOf(outer).value_or("");
-        if (package == "/Script/CoreUObject")
+        if (package == "/Script/CoreUObject" || (m_layout.Ue3 && package == "Core"))
             return 3;
-        if (package == "/Script/Engine")
+        if (package == "/Script/Engine" || (m_layout.Ue3 && package == "Engine"))
             return 2;
         return package.starts_with("/Script/") ? 1 : 0;
     }
@@ -1195,10 +1370,14 @@ namespace Manifold::Target
             return false;
         if (m_layout.Super >= 0)
             return true;
-        for (int offset = m_layout.Outer + m_pointer; offset <= 0x80; offset += m_pointer)
+        // ∑ UE3: UClass derives from UState, which derives from UStruct.
+        const std::uint64_t state = m_layout.Ue3 ? Type("State") : 0;
+        for (int offset = m_layout.Outer + m_pointer; offset <= 0xC0; offset += m_pointer)
         {
             const auto at = static_cast<std::uint64_t>(offset);
-            if (ReadPointer(structType + at) == field && ReadPointer(field + at) == object && ReadPointer(classType + at) == structType)
+            const auto classSuper = ReadPointer(classType + at);
+            const bool classOk = classSuper == structType || (state && classSuper == state && ReadPointer(state + at) == structType);
+            if (ReadPointer(structType + at) == field && ReadPointer(field + at) == object && classOk)
             {
                 m_layout.Super = offset;
                 return true;
@@ -1209,7 +1388,7 @@ namespace Manifold::Target
 
     bool UnrealRuntime::ProbePropertyFields(std::uint64_t x, std::uint64_t y, std::uint64_t z)
     {
-        for (int offset = m_pointer == 8 ? 0x20 : 0x18; offset <= 0x90; offset += 4)
+        for (int offset = m_pointer == 8 ? 0x20 : 0x18; offset <= 0xC0; offset += 4)
         {
             if (const auto preset = Override("offset"); preset && offset != *preset)
                 continue;
@@ -1251,7 +1430,18 @@ namespace Manifold::Target
             const std::uint64_t head = ReadObject(vector + static_cast<std::uint64_t>(list));
             if (!head)
                 continue;
-            for (int name = 8; name <= 0x40; name += 4)
+            // ∑ A UProperty (UE3, UE4 before 4.25) is a UObject and its name is the object's name, so that offset goes
+            //   first. Scanning upwards from 8 can stop at the object index first when an object's index happens to
+            //   be the FName index of "X".
+            std::vector<int> names;
+            if (m_layout.Name >= 0)
+                names.push_back(m_layout.Name);
+            for (int name = 8; name <= 0x70; name += 4)
+            {
+                if (name != m_layout.Name)
+                    names.push_back(name);
+            }
+            for (const int name : names)
             {
                 if (const auto preset = Override("fieldName"); preset && name != *preset)
                     continue;
@@ -1259,7 +1449,7 @@ namespace Manifold::Target
                 if (headName != "X" && headName != "Z")
                     continue;
                 const bool forward = headName == "X";
-                for (int next = m_pointer; next <= 0x48; next += m_pointer)
+                for (int next = m_pointer; next <= 0x70; next += m_pointer)
                 {
                     if (const auto preset = Override("next"); preset && next != *preset)
                         continue;
@@ -1306,18 +1496,25 @@ namespace Manifold::Target
             return;
         const int c = m_layout.Component;
         const std::pair<const char*, int> known[] = { { "Vector", 3 * c }, { "Vector2D", 2 * c }, { "LinearColor", 16 }, { "IntPoint", 8 } };
-        for (int offset = m_layout.ChildProperties + m_pointer; offset <= m_layout.ChildProperties + 0x40; offset += 4)
+        // ∑ A UE3 x86 build keeps PropertySize as a 16-bit value with another 16-bit field above it (0x0400000C for
+        //   Vector), so a second pass compares the low half only.
+        for (const bool narrow : { false, true })
         {
-            bool ok = true;
-            for (const auto& [name, size] : known)
+            for (int offset = m_layout.ChildProperties + m_pointer; offset <= m_layout.ChildProperties + 0x40; offset += 4)
             {
-                const std::uint64_t type = Type(name);
-                ok = ok && type && ReadInt(type + static_cast<std::uint64_t>(offset)) == size;
-            }
-            if (ok)
-            {
-                m_layout.StructSize = offset;
-                return;
+                bool ok = true;
+                for (const auto& [name, size] : known)
+                {
+                    const std::uint64_t type = Type(name);
+                    const auto value = type ? ReadInt(type + static_cast<std::uint64_t>(offset)) : std::nullopt;
+                    ok = ok && value && (narrow ? (*value & 0xFFFF) : *value) == size;
+                }
+                if (ok)
+                {
+                    m_layout.StructSize = offset;
+                    m_layout.StructSize16 = narrow;
+                    return;
+                }
             }
         }
     }
@@ -1326,7 +1523,9 @@ namespace Manifold::Target
     {
         if (!type || m_layout.StructSize < 0)
             return std::nullopt;
-        const auto size = ReadInt(type + static_cast<std::uint64_t>(m_layout.StructSize));
+        auto size = ReadInt(type + static_cast<std::uint64_t>(m_layout.StructSize));
+        if (size && m_layout.StructSize16)
+            *size &= 0xFFFF;
         if (!size || *size <= 0 || *size >= 0x1000000)
             return std::nullopt;
         return *size;
@@ -1359,15 +1558,35 @@ namespace Manifold::Target
     {
         if (m_layout.Extra >= 0)
             return;
-        const std::uint64_t scene = Type("SceneComponent");
         const std::uint64_t vector = Type("Vector");
-        const std::uint64_t root = FieldIn(Type("Actor"), "RootComponent");
-        const std::uint64_t location = FieldIn(scene, "RelativeLocation");
-        if (!root || !location)
+        // ∑ UE3 has no SceneComponent: Actor.Owner is an ObjectProperty of Actor, Actor.Location a StructProperty of Vector.
+        const std::uint64_t actor = Type("Actor");
+        const std::uint64_t pointTo = m_layout.Ue3 ? actor : Type("SceneComponent");
+        const std::uint64_t root = m_layout.Ue3 ? FieldIn(actor, "Owner") : FieldIn(actor, "RootComponent");
+        const std::uint64_t location = m_layout.Ue3 ? FieldIn(actor, "Location") : FieldIn(pointTo, "RelativeLocation");
+        // ∑ A heavily changed UE3 build has no Actor.Location, and every one of its properties points at Actor a few slots
+        //   further on (the owning struct). An ArrayProperty of Actor tells the two apart: its slot holds the inner
+        //   property.
+        std::uint64_t array = 0;
+        if (m_layout.Ue3 && !location && root)
+        {
+            std::uint64_t field = ReadObject(actor + static_cast<std::uint64_t>(m_layout.ChildProperties));
+            for (int guard = 0; field && !array && guard < kMaxFields; ++guard)
+            {
+                if (NameOf(ClassOf(field)) == "ArrayProperty")
+                    array = field;
+                field = ReadObject(field + static_cast<std::uint64_t>(m_layout.Next));
+            }
+        }
+        if (!root || (!location && !array) || !pointTo)
             return;
         for (int offset = (m_layout.Offset + 4 + m_pointer - 1) & ~(m_pointer - 1); offset <= 0x100; offset += m_pointer)
         {
-            if (ReadPointer(root + static_cast<std::uint64_t>(offset)) == scene && ReadPointer(location + static_cast<std::uint64_t>(offset)) == vector)
+            const auto at = static_cast<std::uint64_t>(offset);
+            if (ReadPointer(root + at) != pointTo)
+                continue;
+            const bool second = location ? ReadPointer(location + at) == vector : IsPropertyKind(NameOf(ClassOf(ReadObject(array + at))).value_or(""));
+            if (second)
             {
                 m_layout.Extra = offset;
                 return;
@@ -1480,11 +1699,22 @@ namespace Manifold::Target
                     expectations.push_back({ function, set, clear });
                 return function != 0;
             };
-        if (!expect("PlayerController", "EnableCheats", kFuncExec | kFuncNative, kFuncStatic))
-            expect("PlayerController", "FOV", kFuncExec | kFuncNative, kFuncStatic);
-        expect("KismetSystemLibrary", "ExecuteConsoleCommand", kFuncStatic | kFuncNative, kFuncExec);
-        expect("GameplayStatics", "SpawnObject", kFuncStatic | kFuncNative, kFuncExec);
-        expect("Actor", "ReceiveBeginPlay", kFuncEvent | kFuncBlueprintEvent, kFuncNative);
+        if (m_layout.Ue3)
+        {
+            // ∑ UE3 script (Object.uc, Actor.uc, PlayerController.uc): the flag values are the ones UE4 kept.
+            expect("Object", "Not_PreBool", kFuncStatic | kFuncNative, kFuncExec);
+            expect("Actor", "Destroy", kFuncNative, kFuncStatic | kFuncEvent);
+            expect("Actor", "Touch", kFuncEvent, kFuncNative | kFuncStatic);
+            expect("PlayerController", "FOV", kFuncExec, kFuncStatic);
+        }
+        else
+        {
+            if (!expect("PlayerController", "EnableCheats", kFuncExec | kFuncNative, kFuncStatic))
+                expect("PlayerController", "FOV", kFuncExec | kFuncNative, kFuncStatic);
+            expect("KismetSystemLibrary", "ExecuteConsoleCommand", kFuncStatic | kFuncNative, kFuncExec);
+            expect("GameplayStatics", "SpawnObject", kFuncStatic | kFuncNative, kFuncExec);
+            expect("Actor", "ReceiveBeginPlay", kFuncEvent | kFuncBlueprintEvent, kFuncNative);
+        }
         if (expectations.size() < 3)
             return;
         for (int offset = m_layout.StructSize >= 0 ? m_layout.StructSize + 4 : 0x40; offset <= 0x200; offset += 4)
@@ -1524,5 +1754,9 @@ namespace Manifold::Target
         }
         if (const auto value = Override("fField"))
             m_layout.FField = *value != 0;
+        if (const auto value = Override("ue3"))
+            m_layout.Ue3 = *value != 0;
+        if (const auto value = Override("structSize16"))
+            m_layout.StructSize16 = *value != 0;
     }
 }

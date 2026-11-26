@@ -10,6 +10,7 @@
 #include "Target/Unreal.h"
 
 #include "Target/FakeUnreal.h"
+#include "Target/FakeUnreal3.h"
 
 #include <windows.h>
 
@@ -50,6 +51,169 @@ namespace Manifold::Tests
             Fake fake{};
             std::memcpy(&fake, wide, sizeof(fake));
             return fake;
+        }
+
+        using Fake3 = FakeUnreal3::ImageOf<std::uint64_t>;
+        constexpr std::size_t kFake3Slots = sizeof(Fake3) / sizeof(std::uint64_t);
+
+        Fake3 Widen3(const FakeUnreal3::Image& image)
+        {
+            std::uintptr_t narrow[kFake3Slots] = {};
+            std::uint64_t wide[kFake3Slots] = {};
+            std::memcpy(narrow, &image, sizeof(narrow));
+            std::copy(std::begin(narrow), std::end(narrow), std::begin(wide));
+            Fake3 fake{};
+            std::memcpy(&fake, wide, sizeof(fake));
+            return fake;
+        }
+
+        Fake3 ReadFake3(const Target::Process& process, std::uint64_t table)
+        {
+            std::uint64_t wide[kFake3Slots] = {};
+            for (std::size_t i = 0; i < kFake3Slots; ++i)
+                wide[i] = process.ReadPointer(table + i * static_cast<std::uint64_t>(process.PointerSize())).value_or(0);
+            Fake3 fake{};
+            std::memcpy(&fake, wide, sizeof(fake));
+            return fake;
+        }
+
+        const FakeUnreal3::Offsets& Ue3Offsets(int pointer, bool early)
+        {
+            if (pointer == 8)
+                return early ? FakeUnreal3::kEarly64 : FakeUnreal3::kLate64;
+            return early ? FakeUnreal3::kEarly32 : FakeUnreal3::kLate32;
+        }
+
+        void Ue3Layout(Engine& engine, const Fake3& fake, const FakeUnreal3::Offsets& o, const Target::UnrealConfig& config, const std::string& label)
+        {
+            using namespace FakeUnreal3;
+            Target::UnrealRuntime runtime;
+            const Status status = runtime.Resolve(engine.Process(), config, true, nullptr);
+            const Target::UnrealLayout& got = runtime.Layout();
+            CHECK_MSG(status.Ok(), label + ": " + status.Text + Format(" | item %X index %X class %X name %X outer %X super %X props %X fname %X next %X offset %X size %X",
+                got.ItemSize, got.Index, got.Class, got.Name, got.Outer, got.Super, got.ChildProperties, got.FieldName, got.Next, got.Offset, got.Size));
+            if (!status)
+                return;
+            const Target::UnrealSummary& s = runtime.Summary();
+            CHECK_MSG(s.NamePool == fake.Names && s.LegacyNames && s.FlatNames, label + ": names at " + Hex(s.NamePool, 0) + ", expected " + Hex(fake.Names, 0));
+            CHECK_MSG(s.Objects == fake.Objects && s.ObjectCount == kObjectCount, label + ": objects at " + Hex(s.Objects, 0));
+            const Target::UnrealLayout& l = runtime.Layout();
+            CHECK_MSG(l.Ue3 && !l.FField && !l.Chunked && l.ItemSize == o.Pointer && l.ItemOffset == 0, label);
+            CHECK_MSG(l.Index == o.Index && l.Class == o.Class && l.Name == o.Name && l.Outer == o.Outer,
+                Format("%s: index %X class %X name %X outer %X", label.c_str(), l.Index, l.Class, l.Name, l.Outer));
+            CHECK_MSG(l.Super == o.Super && l.ChildProperties == o.Children && l.StructSize == o.PropertySize && l.FieldName == o.Name && l.Next == o.Next,
+                Format("%s: super %X children %X size %X fname %X next %X", label.c_str(), l.Super, l.ChildProperties, l.StructSize, l.FieldName, l.Next));
+            CHECK_MSG(l.Offset == o.Offset && l.Size == o.ArrayDim + 4 && l.Extra == o.Extra && l.Component == 4,
+                Format("%s: offset %X size %X extra %X", label.c_str(), l.Offset, l.Size, l.Extra));
+            CHECK_MSG(l.Children == o.Children && l.ChildNext == o.Next && l.FunctionFlags == o.FunctionFlags, Format("%s: function flags %X", label.c_str(), l.FunctionFlags));
+            CHECK_MSG(l.StructSize16 == (o.Pointer == 4 && !fake.Early), label + ": 16-bit PropertySize");
+
+            CHECK_MSG(runtime.Type("actor") == fake.Actor && runtime.Enum("EMyMode") == fake.Mode && runtime.Type("State") == fake.StateClass, label);
+            CHECK_MSG(runtime.CppName(fake.Actor) == "AActor" && runtime.CppName(fake.Pawn) == "APawn" && runtime.CppName(fake.Vector) == "FVector" &&
+                runtime.CppName(fake.LocalPlayer) == "ULocalPlayer", label);
+            CHECK_MSG(runtime.StructSize(fake.Actor) == kActorSize && runtime.StructSize(fake.Vector) == 12, label);
+            CHECK_MSG(runtime.FullName(fake.ActorInstance) == "Engine.MyActor" && runtime.FullName(fake.Vector) == "Core.Object.Vector", label + ": " + runtime.FullName(fake.Vector));
+            CHECK_MSG(runtime.NameOf(fake.Engine) == "GameEngine_1" && runtime.NameOf(fake.PlayerInstance) == "LocalPlayer_0", label);
+            CHECK_MSG(runtime.NameOf(fake.PawnInstance) == "MyPawn", label + ": wide name " + runtime.NameOf(fake.PawnInstance).value_or("-"));
+            CHECK_MSG(runtime.NameText(FakeUnreal3::kNameCount + 100) == std::nullopt, label);
+            CHECK_MSG(runtime.IsObject(fake.ActorInstance) && !runtime.IsObject(fake.ActorInstance + 8), label);
+
+            const auto fields = runtime.Fields(fake.Actor);
+            CHECK_MSG(fields.size() == 8, label + ": " + std::to_string(fields.size()) + " Actor fields");
+            if (fields.size() == 8)
+            {
+                CHECK_MSG(fields[0].Name == "Outer" && fields[0].Offset == o.Outer && fields[0].Owner == "Object" && runtime.TypeText(fields[0]) == "UObject*", label);
+                CHECK_MSG(fields[1].Name == "Owner" && runtime.TypeText(fields[1]) == "AActor*" && fields[1].Offset == kOwner && fields[1].Size == o.Pointer, label);
+                CHECK_MSG(fields[2].Name == "Location" && runtime.TypeText(fields[2]) == "FVector" && fields[2].Inner == fake.Vector, label);
+                CHECK_MSG(fields[3].Name == "bHidden" && fields[3].Bitfield && fields[3].Mask == 0x04 && fields[3].Start() == kBits, label);
+                CHECK_MSG(fields[4].Name == "bCanTeleport" && fields[4].Bitfield && fields[4].Mask == 0x02 && fields[4].Start() == kBits + 1 && fields[4].MaskedBit(), label);
+                CHECK_MSG(fields[5].Name == "Health" && runtime.TypeText(fields[5]) == "float" && fields[5].Flags == 1, label);
+                CHECK_MSG(fields[6].Name == "Tags" && runtime.TypeText(fields[6]) == "TArray<FName>" && fields[6].Size == o.Pointer + 8, label + ": " + runtime.TypeText(fields[6]));
+                CHECK_MSG(fields[7].Name == "WorldInfo" && runtime.TypeText(fields[7]) == "AWorldInfo*", label);
+            }
+            CHECK_MSG(runtime.Fields(fake.Vector).size() == 3 && runtime.Fields(fake.ObjectClass).size() == 1, label);
+            const auto entries = runtime.EnumEntries(fake.Mode);
+            CHECK_MSG(entries.size() == 3 && entries[1].Name == "MM_B" && entries[1].Value == 1 && entries.back().Name == "MM_MAX" && entries.back().Value == 2, label);
+            const auto own = runtime.Functions(fake.PlayerController, false);
+            CHECK_MSG(own.size() == 1 && own.front().Name == "FOV" && own.front().Flags == kFuncExec, label);
+            CHECK_MSG(runtime.Functions(fake.Actor, false).size() == 2 && runtime.Functions(fake.Pawn, true).size() == 3, label);
+
+            CHECK_MSG(runtime.Engine() == fake.Engine, label);
+            CHECK_MSG(runtime.Controller() == fake.ControllerInstance, label);
+            CHECK_MSG(runtime.Pawn() == fake.PawnInstance, label);
+            CHECK_MSG(runtime.World() == fake.WorldInfo, label);
+            const auto pawns = runtime.Instances(fake.Pawn, 0);
+            CHECK_MSG(pawns.size() == 1 && pawns.front() == fake.PawnInstance, label);
+            CHECK_MSG(runtime.Instances(fake.Actor, 0).size() == 4, label + ": Default__Actor must not count");
+
+            const auto owner = runtime.Whois(fake.ActorInstance + kOwner);
+            CHECK_MSG(owner && owner->find("Owner  AActor*") != std::string::npos, owner.value_or("-"));
+            const auto bit = runtime.Whois(fake.ActorInstance + kBits + 1);
+            CHECK_MSG(bit && bit->find("bCanTeleport") != std::string::npos, bit.value_or("-"));
+            const auto outer = runtime.Whois(fake.ActorInstance + static_cast<std::uint64_t>(o.Outer));
+            CHECK_MSG(outer && outer->find(": Outer") != std::string::npos, outer.value_or("-"));
+            int inside = -1;
+            CHECK_MSG(runtime.HeaderField(0, inside) == "VfTableObject" && runtime.HeaderField(o.Index, inside) == "ObjectInternalInteger", label);
+
+            CHECK_MSG(runtime.ResolveSymbol("Actor_Health") == static_cast<std::uint64_t>(kHealth) && runtime.ResolveSymbol("PlayerController_Pawn") == static_cast<std::uint64_t>(kPawn), label);
+            const auto walk = runtime.Walk(fake.ActorInstance, "A", { "Location" });
+            CHECK_MSG(walk.Ok() && walk->Address == fake.ActorInstance + kLocation && walk->Expression == "A+Actor_Location", label);
+            const auto chain = runtime.Walk(fake.Engine, "E", { "GamePlayers[0]", "Actor", "Pawn" });
+            CHECK_MSG(chain.Ok() && chain->Address == fake.ControllerInstance + kPawn, label + ": " + (chain.Ok() ? chain->Expression : chain.Error().Text));
+            CHECK_MSG(runtime.NameAt(fake.TagData + 8) == "Brave", label);
+
+            const Table::UnrealFill fill = Table::FillUnrealObject(runtime, fake.ActorInstance, true);
+            const auto named = [&](const std::string& prefix) { return std::find_if(fill.Fields.begin(), fill.Fields.end(), [&](const Table::StructField& f) { return f.Name.rfind(prefix, 0) == 0; }); };
+            CHECK_MSG(named("VfTableObject") != fill.Fields.end() && named("VfTableObject")->Offset == 0, label);
+            CHECK_MSG(named("Outer") != fill.Fields.end() && named("Outer")->Offset == o.Outer && named("Outer")->Size == o.Pointer, label);
+            const auto outers = std::count_if(fill.Fields.begin(), fill.Fields.end(), [](const Table::StructField& f) { return f.Name.rfind("Outer", 0) == 0; });
+            CHECK_MSG(outers == 1, label + ": Outer is reflected and must not be added again by the header (" + std::to_string(outers) + "x)");
+            CHECK_MSG(named("Name") != fill.Fields.end() && named("Name")->CustomType == Target::kUnrealFNameType && named("Name")->Offset == o.Name, label);
+            CHECK_MSG(named("ObjectFlags") == fill.Fields.end(), label);
+            CHECK_MSG(named("Health") != fill.Fields.end() && named("Health")->Offset == kHealth && named("Health")->Type == Scan::ValueType::Float, label);
+            CHECK_MSG(named("bCanTeleport") != fill.Fields.end() && named("bCanTeleport")->Type == Scan::ValueType::Binary && named("bCanTeleport")->Offset == kBits + 1 &&
+                named("bCanTeleport")->BitStart == 1, label);
+            CHECK_MSG(named("Tags.Num") != fill.Fields.end() && named("Tags.Num")->Offset == kTags + o.Pointer, label);
+        }
+
+        void Ue3SessionAndLua(Engine& engine, const Fake3& fake)
+        {
+            UnrealSession& session = engine.Unreal();
+            session.Config().NamePool = fake.Names;
+            session.Config().LegacyNames = true;
+            session.Config().Objects = fake.Objects;
+            const Status status = session.ResolveNow();
+            CHECK_MSG(status.Ok(), status.Text);
+            CHECK_MSG(session.Ready() && session.StatusText().rfind("UE3 ", 0) == 0, session.StatusText());
+            std::string result;
+            const std::string code = Format(R"LUA(
+                local unreal = manifold.unreal
+                if not unreal.status().ue3 or not unreal.layout().ue3 then return "ue3 flag" end
+                if unreal.field("Actor", "Health").typeText ~= "float" then return "health" end
+                if unreal.cppName("PlayerController") ~= "APlayerController" then return "cpp" end
+                if #unreal.enum("EMyMode") ~= 3 then return "enum" end
+                if unreal.controller() ~= 0x%llX then return "controller " .. tostring(unreal.controller()) end
+                if unreal.pawn() ~= 0x%llX then return "pawn" end
+                local symbol, offset = unreal.offset("Actor", "Location")
+                if symbol ~= "Actor_Location" or offset ~= 0x110 then return "offset " .. tostring(symbol) end
+                return "ok")LUA",
+                static_cast<unsigned long long>(fake.ControllerInstance), static_cast<unsigned long long>(fake.PawnInstance));
+            const Status lua = engine.Lua().RunWithResult(code, "unreal 3 api", result);
+            CHECK_MSG(lua.Ok() && result == "ok", lua.Ok() ? result : lua.Text);
+            session.Stop();
+            CHECK(session.Stopped() && !session.Ready());
+            session.Config() = Target::UnrealConfig{};
+        }
+
+        void Ue3Checks(Engine& engine, const Fake3& fake, const FakeUnreal3::Offsets& o, const std::string& label)
+        {
+            Ue3Layout(engine, fake, o, Target::UnrealConfig{}, label + " (search)");
+            Target::UnrealConfig configured;
+            configured.NamePool = fake.Names;
+            configured.LegacyNames = true;
+            configured.Objects = fake.Objects;
+            Ue3Layout(engine, fake, o, configured, label + " (configured)");
+            Ue3SessionAndLua(engine, fake);
         }
 
         void SyntheticLayout(Engine& engine, const Fake& fake, const FakeUnreal::Offsets& o, const Target::UnrealConfig& config, const char* label)
@@ -367,6 +531,19 @@ namespace Manifold::Tests
             std::printf("resolve: %s (%.2f s)\n", status.Ok() ? "ok" : status.Text.c_str(), std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count());
             if (!status)
             {
+                // What the probes got that far, and the first object headers as pointer-sized words with the name.
+                const Target::UnrealLayout& l = runtime.Layout();
+                std::printf("so far: item %X+%X index %X class %X name %X outer %X super %X props %X fname %X next %X offset %X size %X, %d objects\n", l.ItemSize, l.ItemOffset,
+                    l.Index, l.Class, l.Name, l.Outer, l.Super, l.ChildProperties, l.FieldName, l.Next, l.Offset, l.Size, runtime.Count());
+                const int width = engine.Process()->PointerSize();
+                for (int i = 0; i < 24 && i < runtime.Count(); ++i)
+                {
+                    const std::uint64_t object = runtime.ObjectAt(i).value_or(0);
+                    std::printf("  [%2d] %llX %-28s", i, static_cast<unsigned long long>(object), runtime.NameOf(object).value_or("-").c_str());
+                    for (int at = 0; object && at < 0x70; at += width)
+                        std::printf(" %0*llX", width * 2, static_cast<unsigned long long>(engine.Process()->ReadPointer(object + static_cast<std::uint64_t>(at)).value_or(0)));
+                    std::printf("\n");
+                }
                 engine.CloseProcess();
                 return 1;
             }
@@ -488,7 +665,7 @@ namespace Manifold::Tests
                 }
             }
 
-            bool Start(const std::filesystem::path& path)
+            bool Start(const std::filesystem::path& path, const wchar_t* argument = L"--unreal")
             {
                 SECURITY_ATTRIBUTES security{ sizeof(security), nullptr, TRUE };
                 HANDLE read = nullptr;
@@ -500,7 +677,7 @@ namespace Manifold::Tests
                 startup.dwFlags = STARTF_USESTDHANDLES;
                 startup.hStdOutput = write;
                 startup.hStdError = write;
-                std::wstring command = L"\"" + path.wstring() + L"\" --unreal";
+                std::wstring command = L"\"" + path.wstring() + L"\" " + argument;
                 const BOOL started = ::CreateProcessW(nullptr, command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &Info);
                 ::CloseHandle(write);
                 std::string text;
@@ -570,6 +747,44 @@ namespace Manifold::Tests
         }
     }
 
+    namespace
+    {
+        void SyntheticTarget3(const std::filesystem::path& targetPath, bool early, const std::string& label)
+        {
+            std::error_code missing;
+            if (!std::filesystem::exists(targetPath, missing))
+            {
+                Skip("the test target " + targetPath.string() + " was not built");
+                return;
+            }
+            UnrealTarget target;
+            const bool started = target.Start(targetPath, early ? L"--unreal3-early" : L"--unreal3");
+            CHECK_MSG(started, "could not start " + WideToUtf8(targetPath.wstring()) + " for " + label);
+            if (!started)
+                return;
+            Settings settings;
+            Engine engine(settings);
+            engine.Lua().Run("__manifoldHeadless = true", "headless");
+            engine.Unreal().Config().AutoStart = false;
+            const Status opened = engine.OpenProcess(MakeProcessId(target.Info.dwProcessId));
+            CHECK_MSG(opened.Ok(), opened.Text);
+            if (!opened)
+                return;
+            const Target::Process& process = *engine.Process();
+            const std::string stem = std::filesystem::path(process.Name()).stem().string();
+            const std::uint64_t table = engine.Evaluate(stem + ".g_unreal3Fake").value_or(0);
+            CHECK_MSG(table != 0, label);
+            const Fake3 fake = table ? ReadFake3(process, table) : Fake3{};
+            CHECK_MSG(fake.Names != 0 && fake.Objects != 0 && fake.ActorInstance != 0 && (fake.Early != 0) == early, label);
+            if (fake.Names && fake.Objects && fake.ActorInstance)
+                Ue3Checks(engine, fake, Ue3Offsets(process.PointerSize(), early), label);
+            engine.CloseProcess();
+            DWORD code = 0;
+            ::GetExitCodeProcess(target.Info.hProcess, &code);
+            CHECK_MSG(code == STILL_ACTIVE, label + ": the target ended with " + Hex(code, 8));
+        }
+    }
+
     int RunUnrealTests(const std::filesystem::path& target)
     {
         const int before = Totals().Failures;
@@ -626,9 +841,40 @@ namespace Manifold::Tests
         VariantLayout(engine, { .Doubles = true, .SplitEnum = true }, "UE 5.7 split enum arrays");
         VariantLayout(engine, { .Doubles = true, .SplitEnum = true, .NoMaxEnum = true }, "UE 5.7 enum without _MAX");
         VariantLayout(engine, { .NoMaxEnum = true }, "enum without _MAX");
+        for (const bool early : { false, true })
+        {
+            FakeUnreal3::Builder builder;
+            CHECK(builder.Build(early));
+            Ue3Checks(engine, Widen3(builder.Fake), FakeUnreal3::Native(early), early ? "UE3 early" : "UE3 late");
+        }
+        {
+            // No Actor.Location, and an owner pointer ahead of the class/struct/inner slot.
+            FakeUnreal3::Builder builder;
+            CHECK(builder.Build(false, true));
+            const Fake3 fake = Widen3(builder.Fake);
+            const FakeUnreal3::Offsets& o = FakeUnreal3::Native(false);
+            Target::UnrealRuntime runtime;
+            const Status status = runtime.Resolve(engine.Process(), Target::UnrealConfig{}, true, nullptr);
+            CHECK_MSG(status.Ok(), "UE3 without Location: " + status.Text);
+            if (status)
+            {
+                CHECK_MSG(runtime.Layout().Extra == o.Extra, Format("UE3 without Location: extra %X, expected %X", runtime.Layout().Extra, o.Extra));
+                const auto location = runtime.FindField(fake.Actor, "WorldLocation");
+                CHECK_MSG(location && location->Inner == fake.Vector && runtime.TypeText(*location) == "FVector", "UE3 without Location: WorldLocation");
+                const auto tags = runtime.FindField(fake.Actor, "Tags");
+                CHECK_MSG(tags && runtime.TypeText(*tags) == "TArray<FName>", "UE3 without Location: Tags");
+                const auto owner = runtime.FindField(fake.Actor, "Owner");
+                CHECK_MSG(owner && runtime.TypeText(*owner) == "AActor*", "UE3 without Location: Owner");
+            }
+        }
         engine.CloseProcess();
         SyntheticTarget(target.parent_path() / L"TestTarget32.exe", FakeUnreal::kOffsets32, "32-bit target");
         SyntheticTarget(target.parent_path() / L"TestTarget.exe", FakeUnreal::kOffsets64, "64-bit target");
+        for (const bool early : { false, true })
+        {
+            SyntheticTarget3(target.parent_path() / L"TestTarget32.exe", early, early ? "UE3 early, 32-bit target" : "UE3 late, 32-bit target");
+            SyntheticTarget3(target.parent_path() / L"TestTarget.exe", early, early ? "UE3 early, 64-bit target" : "UE3 late, 64-bit target");
+        }
         return Totals().Failures - before;
     }
 

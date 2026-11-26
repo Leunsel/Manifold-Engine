@@ -254,7 +254,7 @@ namespace Manifold
         RegisterCoreSymbols();
         m_target.RefreshSymbolProvider();
         const Target::UnrealSummary& summary = runtime->Summary();
-        m_notify(LogLevel::Success, Format("Unreal Engine %s: %s objects, %s types (%.1f s)", summary.LegacyNames ? "4.22 or older" : "4.23+",
+        m_notify(LogLevel::Success, Format("Unreal Engine %s: %s objects, %s types (%.1f s)", summary.Layout.Ue3 ? "3" : summary.LegacyNames ? "4.22 or older" : "4.23+",
             Grouped(static_cast<std::uint64_t>(summary.ObjectCount)).c_str(), Grouped(summary.TypeCount).c_str(), summary.Seconds));
         if (m_ready)
             m_ready();
@@ -305,7 +305,7 @@ namespace Manifold
             if (const auto runtime = Runtime())
             {
                 const Target::UnrealSummary& summary = runtime->Summary();
-                return Format("%s · %s objects · %s types · %s", summary.LegacyNames ? "UE 4.22 or older" : "UE 4.23+", Grouped(static_cast<std::uint64_t>(runtime->Count())).c_str(),
+                return Format("%s · %s objects · %s types · %s", summary.Layout.Ue3 ? "UE3" : summary.LegacyNames ? "UE 4.22 or older" : "UE 4.23+", Grouped(static_cast<std::uint64_t>(runtime->Count())).c_str(),
                     Grouped(summary.TypeCount).c_str(), summary.Layout.Component == 8 ? "double vectors (UE5)" : "float vectors");
             }
             return "not resolved";
