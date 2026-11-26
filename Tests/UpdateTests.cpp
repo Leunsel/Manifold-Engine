@@ -290,6 +290,22 @@ namespace Manifold::Tests
             CHECK(!std::filesystem::exists(folder / "Manifold-Engine.exe.update-old"));
         }
 
+        void LeftoversAfterFailure(const std::filesystem::path& root)
+        {
+            const std::filesystem::path folder = root / "leftovers";
+            WriteText(folder / "Manifold-Engine.exe", "exe 1");
+            WriteText(folder / "ManifoldClr.exe", "clr 1");
+            WriteText(folder / "ManifoldAgent.dll.update-old", "agent 0");
+            WriteText(folder / "update-leftovers.txt", "ManifoldAgent.dll.update-old\r\n");
+            const HANDLE held = ::CreateFileW((folder / "ManifoldClr.exe").c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+            const Status status = Updates::Apply(folder, { { "Manifold-Engine.exe", ToBytes("exe 2") }, { "ManifoldClr.exe", ToBytes("clr 2") } }, root / "backup");
+            ::CloseHandle(held);
+            CHECK(!status.Ok() && ReadText(folder / "Manifold-Engine.exe") == "exe 1");
+            const std::string listed = ReadText(folder / "update-leftovers.txt");
+            CHECK_MSG(listed.find("ManifoldAgent.dll.update-old") != std::string::npos, "update-leftovers.txt after the failed install: \"" + listed + "\"");
+            CHECK(Updates::RemoveLeftovers(folder).empty() && !std::filesystem::exists(folder / "ManifoldAgent.dll.update-old"));
+        }
+
         void Blocker(const std::filesystem::path& root)
         {
             WriteText(root / "source/Manifold-Engine.sln", "");
@@ -327,6 +343,7 @@ namespace Manifold::Tests
         Unpacking();
         Install(root);
         Rollback(root);
+        LeftoversAfterFailure(root);
         Blocker(root);
         LocalFeed(root);
         std::filesystem::remove_all(root, ignored);
