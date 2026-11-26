@@ -23,8 +23,15 @@ namespace Manifold::Table
     {
         std::vector<StructField> Fields;
         std::vector<UnrealArrayRef> Arrays;
+        // The structures that StructProperty fields embed (ChildStructure = the struct's C++ name), with their own
+        // fields counted from 0; nested structs inside them are listed here as well.
+        std::vector<std::pair<std::string, std::vector<StructField>>> Structs;
         bool Handled = false;
     };
+
+    // Adds the structures a fill embeds to the store: a structure of that name that already has fields is kept,
+    // and `skip` (the structure being filled) is never replaced.
+    void AddUnrealStructures(StructureStore& store, const UnrealFill& fill, const std::string& skip);
 
     using UnrealArrayLookup = std::function<std::optional<std::pair<Target::UnrealField, std::uint64_t>>(std::uint64_t data)>;
 

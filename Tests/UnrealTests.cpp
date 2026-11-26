@@ -174,6 +174,20 @@ namespace Manifold::Tests
             CHECK_MSG(named("bCanTeleport") != fill.Fields.end() && named("bCanTeleport")->Type == Scan::ValueType::Binary && named("bCanTeleport")->Offset == kBits + 1 &&
                 named("bCanTeleport")->BitStart == 1, label);
             CHECK_MSG(named("Tags.Num") != fill.Fields.end() && named("Tags.Num")->Offset == kTags + o.Pointer, label);
+            // A struct member is one embedded field with its own structure, not Location.X/.Y/.Z.
+            CHECK_MSG(named("Location") != fill.Fields.end() && named("Location")->ChildStructure == "FVector" && named("Location")->Offset == kLocation &&
+                named("Location")->Size == 12 && named("Location")->Type == Scan::ValueType::ByteArray, label);
+            CHECK_MSG(named("Location.X") == fill.Fields.end(), label + ": struct members must not be spread out");
+            const auto vector = std::find_if(fill.Structs.begin(), fill.Structs.end(), [](const auto& entry) { return entry.first == "FVector"; });
+            CHECK_MSG(vector != fill.Structs.end() && vector->second.size() == 3 && vector->second[2].Name == "Z" && vector->second[2].Offset == 8 &&
+                vector->second[2].Type == Scan::ValueType::Float, label);
+            Table::StructureStore store;
+            store.Add("MyActor");
+            Table::AddUnrealStructures(store, fill, "MyActor");
+            CHECK_MSG(store.Find("FVector") && store.Find("FVector")->Fields.size() == 3, label);
+            store.Find("FVector")->Fields.resize(1);
+            Table::AddUnrealStructures(store, fill, "MyActor");
+            CHECK_MSG(store.Find("FVector")->Fields.size() == 1, label + ": a structure the user already has is kept");
         }
 
         void Ue3SessionAndLua(Engine& engine, const Fake3& fake)
@@ -396,6 +410,11 @@ namespace Manifold::Tests
                 const auto z = std::find_if(vector.Fields.begin(), vector.Fields.end(), [](const Table::StructField& f) { return f.Name.rfind("Z", 0) == 0; });
                 CHECK_MSG(z != vector.Fields.end() && z->Offset == 2 * component && z->Type == (variant.Doubles ? Scan::ValueType::Double : Scan::ValueType::Float), label);
             }
+            const Table::UnrealFill scene = Table::FillUnrealObject(runtime, fake.SceneInstance, true);
+            const auto relative = std::find_if(scene.Fields.begin(), scene.Fields.end(), [](const Table::StructField& f) { return f.Name == "RelativeLocation"; });
+            CHECK_MSG(relative != scene.Fields.end() && relative->ChildStructure == "FVector" && relative->Offset == locationAt && relative->Size == 3 * component, label);
+            CHECK_MSG(scene.Structs.size() == 1 && scene.Structs.front().first == "FVector" && scene.Structs.front().second.size() == 3 &&
+                scene.Structs.front().second[1].Offset == component, label);
             const auto entries = runtime.EnumEntries(fake.Mode);
             const std::int64_t last = variant.NarrowEnum || variant.SplitEnum ? 6 : 2;
             CHECK_MSG(entries.size() == 3 && entries.back().Name == (variant.NoMaxEnum ? "EMyMode::C" : "EMyMode_MAX") && entries.back().Value == last && entries[1].Name == "EMyMode::B", label);

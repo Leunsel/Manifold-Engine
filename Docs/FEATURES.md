@@ -861,7 +861,7 @@ In an Unreal Engine 3 game the player is found through the engine's GamePlayers 
 ### In Structure Dissect
 
 - A new structure is named after the object's class and starts at the object.
-- The fields are the class's reflected properties with their real names, nested structs inline, bitfield bools as one-bit fields, and the native gaps in between.
+- The fields are the class's reflected properties with their real names, struct members as embedded structures (FVector, FRotator ...) that are added to the structure list, bitfield bools as one-bit fields, and the native gaps in between.
 - Expanding an object pointer or a TArray fills that one the same way.
 
 ### Types and symbols

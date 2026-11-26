@@ -627,6 +627,7 @@ namespace Manifold::UI
                                 return;
                             }
                             live->Fields = fill.Fields;
+                            Table::AddUnrealStructures(engine.Structures(), fill, live->Name);
                             std::vector<std::pair<std::uint64_t, UnrealArray>> arrays;
                             for (const Table::UnrealArrayRef& array : fill.Arrays)
                                 arrays.push_back({ array.Data, UnrealArray{ array.Field, array.Header } });

@@ -27,10 +27,13 @@ namespace Manifold::Table
             int Size = 4;
             FieldDisplay Display = FieldDisplay::Unsigned;
             std::string Custom;
+            std::string Child;
             int Bit = -1;
             int Order = 0;
             int Width = 8;
         };
+
+        using NestedStructs = std::vector<std::pair<std::string, std::vector<StructField>>>;
 
         int SizeOf(ValueType type, int bytes, int pointer)
         {
@@ -80,15 +83,16 @@ namespace Manifold::Table
         class Filler
         {
         public:
-            Filler(const Target::UnrealRuntime& runtime, const Target::Process& process, std::uint64_t base, bool customTypes)
-                : m_runtime(runtime), m_process(process), m_base(base), m_custom(customTypes), m_pointer(runtime.PointerSize())
+            Filler(const Target::UnrealRuntime& runtime, const Target::Process& process, std::uint64_t base, bool customTypes, NestedStructs& nested)
+                : m_runtime(runtime), m_process(process), m_base(base), m_custom(customTypes), m_pointer(runtime.PointerSize()), m_nested(nested)
             {
             }
 
             int Count() const { return m_count; }
             std::vector<UnrealArrayRef>& Arrays() { return m_arrays; }
 
-            void Add(int offset, std::string name, ValueType type, int width, FieldDisplay display = FieldDisplay::Unsigned, std::string custom = {}, int bit = -1)
+            void Add(int offset, std::string name, ValueType type, int width, FieldDisplay display = FieldDisplay::Unsigned, std::string custom = {}, int bit = -1,
+                std::string child = {})
             {
                 if (m_count >= kElementLimit)
                     return;
@@ -100,10 +104,56 @@ namespace Manifold::Table
                 spec.Size = SizeOf(type, width, m_pointer);
                 spec.Display = display;
                 spec.Custom = m_custom ? std::move(custom) : std::string();
+                spec.Child = std::move(child);
                 spec.Bit = bit;
                 spec.Order = m_count;
                 spec.Width = std::max(1, width);
                 m_specs.push_back(std::move(spec));
+            }
+
+            // ∑ A struct member is one embedded field (like a Mono value type), not its members spread out with
+            //   dotted names; the struct's own definition goes into m_nested once per name.
+            void Embed(const Target::UnrealField& f, int offset, const std::string& name, int depth)
+            {
+                const std::string child = m_runtime.CppName(f.Inner);
+                Add(offset, name, ValueType::ByteArray, std::clamp(f.Size, 1, kMaxFieldBytes), FieldDisplay::Unsigned, {}, -1, child);
+                if (m_base)
+                    CollectArrays(f.Inner, offset, depth + 1);
+                if (depth >= kInlineDepth)
+                    return;
+                const auto known = std::find_if(m_nested.begin(), m_nested.end(), [&](const auto& entry) { return entry.first == child; });
+                if (known != m_nested.end())
+                    return;
+                const std::size_t slot = m_nested.size();
+                m_nested.push_back({ child, {} });
+                Filler inner(m_runtime, m_process, 0, m_custom, m_nested);
+                inner.Struct(f.Inner, 0, "", depth + 1);
+                inner.Gaps(m_runtime.StructSize(f.Inner));
+                m_nested[slot].second = inner.Flush();
+            }
+
+            // TArrays inside embedded structs, at their place in this object, so expanding their data still works.
+            void CollectArrays(std::uint64_t type, int base, int depth)
+            {
+                for (const Target::UnrealField& f : m_runtime.Fields(type))
+                {
+                    const int dim = std::min(f.Dim, kStaticArrayLimit);
+                    for (int i = 0; i < dim; ++i)
+                    {
+                        const int at = base + f.Offset + i * std::max(1, f.Size);
+                        if (f.Type == "ArrayProperty" && f.InnerProperty)
+                        {
+                            const std::uint64_t header = m_base + static_cast<std::uint64_t>(at);
+                            const auto data = m_process.ReadPointer(header);
+                            if (data && m_runtime.IsPointer(*data))
+                                m_arrays.push_back({ *data, f, header });
+                        }
+                        else if (f.Type == "StructProperty" && f.Inner && depth < kInlineDepth)
+                        {
+                            CollectArrays(f.Inner, at, depth + 1);
+                        }
+                    }
+                }
             }
 
             void Value(const Target::UnrealField& f, int offset, const std::string& name, int depth)
@@ -207,12 +257,7 @@ namespace Manifold::Table
                 }
                 if (kind == "StructProperty" && f.Inner)
                 {
-                    if (depth < kInlineDepth)
-                    {
-                        Struct(f.Inner, offset, name + ".", depth + 1);
-                        return;
-                    }
-                    Add(offset, Annotated(name, m_runtime.CppName(f.Inner)), ValueType::ByteArray, std::clamp(f.Size, 1, 256));
+                    Embed(f, offset, name, depth);
                     return;
                 }
                 const int size = std::max(1, f.Size);
@@ -343,6 +388,7 @@ namespace Manifold::Table
                     field.Type = spec.Type;
                     field.Size = spec.Size;
                     field.Display = spec.Display;
+                    field.ChildStructure = spec.Child;
                     if (!spec.Custom.empty())
                     {
                         field.CustomType = spec.Custom;
@@ -371,25 +417,28 @@ namespace Manifold::Table
             int m_count = 0;
             std::vector<Spec> m_specs;
             std::vector<UnrealArrayRef> m_arrays;
+            NestedStructs& m_nested;
         };
 
-        UnrealFill Finish(Filler& filler)
+        UnrealFill Finish(Filler& filler, NestedStructs& nested)
         {
             UnrealFill fill;
             fill.Fields = filler.Flush();
             fill.Arrays = std::move(filler.Arrays());
+            fill.Structs = std::move(nested);
             fill.Handled = !fill.Fields.empty();
             return fill;
         }
 
         UnrealFill FillStruct(const Target::UnrealRuntime& runtime, const Target::Process& process, std::uint64_t type, std::uint64_t base, bool isObject, bool customTypes)
         {
-            Filler filler(runtime, process, base, customTypes);
+            NestedStructs nested;
+            Filler filler(runtime, process, base, customTypes, nested);
             if (isObject)
                 filler.Header();
             filler.Struct(type, 0, "", 0);
             filler.Gaps(runtime.StructSize(type));
-            return Finish(filler);
+            return Finish(filler, nested);
         }
 
         UnrealFill FillArray(const Target::UnrealRuntime& runtime, const Target::Process& process, const Target::UnrealField& array, std::uint64_t header, bool customTypes)
@@ -404,10 +453,25 @@ namespace Manifold::Table
             const int count = std::max(1, process.ReadValue<std::int32_t>(header + static_cast<std::uint64_t>(runtime.PointerSize())).value_or(1));
             const int entries = std::min(count, std::max(4, std::min(kArrayPreview, kArrayPreviewElements / perEntry)));
             const std::uint64_t data = process.ReadPointer(header).value_or(0);
-            Filler filler(runtime, process, data, customTypes);
+            NestedStructs nested;
+            Filler filler(runtime, process, data, customTypes, nested);
             for (int i = 0; i < entries; ++i)
                 filler.Value(*info, i * size, "[" + std::to_string(i) + "]", 0);
-            return Finish(filler);
+            return Finish(filler, nested);
+        }
+    }
+
+    void AddUnrealStructures(StructureStore& store, const UnrealFill& fill, const std::string& skip)
+    {
+        for (const auto& [name, fields] : fill.Structs)
+        {
+            if (fields.empty() || name == skip)
+                continue;
+            StructDefinition* existing = store.Find(name);
+            if (existing && !existing->Fields.empty())
+                continue;
+            StructDefinition& child = existing ? *existing : store.Add(name);
+            child.Fields = fields;
         }
     }
 
