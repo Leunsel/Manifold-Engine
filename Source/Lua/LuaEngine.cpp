@@ -735,6 +735,18 @@ namespace Manifold::Lua
     {
         if (type.NativeText)
         {
+            if (type.NativeUpdate)
+            {
+                std::vector<std::uint8_t> current(static_cast<std::size_t>(type.ByteCount()), 0);
+                const auto& process = m_engine.Process();
+                if (address && process && !process->ReadExact(address, current.data(), current.size()))
+                    return false;
+                auto updated = type.NativeUpdate(text, current);
+                if (!updated)
+                    return false;
+                bytes = std::move(*updated);
+                return true;
+            }
             if (!type.NativeBytes)
                 return false;
             auto native = type.NativeBytes(text);

@@ -815,6 +815,7 @@ namespace Manifold::Tests
         std::uint32_t pid = 0;
         std::uint64_t object = 0;
         std::uint64_t method = 0;
+        std::string classFilter;
         const bool noDumper = std::find(arguments.begin(), arguments.end(), "--no-dumper") != arguments.end();
         const bool compareDumper = std::find(arguments.begin(), arguments.end(), "--compare-dumper") != arguments.end();
         for (const std::string& argument : arguments)
@@ -827,6 +828,8 @@ namespace Manifold::Tests
                 object = ParseHex(argument.substr(9)).value_or(0);
             else if (argument.rfind("--mono-method=", 0) == 0)
                 method = ParseHex(argument.substr(14)).value_or(0);
+            else if (argument.rfind("--class=", 0) == 0)
+                classFilter = argument.substr(8);
         }
         std::setvbuf(stdout, nullptr, _IONBF, 0);
         if (std::find(arguments.begin(), arguments.end(), "--workers") != arguments.end())
@@ -870,6 +873,29 @@ namespace Manifold::Tests
             engine.Mono().ManagedDumperUsed() ? "read by the managed dumper" : "read through the C API, members load on demand");
         if (compareDumper)
             return CompareDumper(engine, classes);
+        if (!classFilter.empty())
+        {
+            std::size_t matched = 0;
+            for (const Target::MonoClass& c : classes)
+            {
+                if (!ContainsNoCase(c.FullName(), classFilter))
+                    continue;
+                ++matched;
+                const std::optional<Target::MonoClass> details = engine.Mono().ClassDetails(c.FullName());
+                if (!details)
+                    continue;
+                std::printf("class %s [%s] parent %s handle %s\n", details->FullName().c_str(), details->Image.c_str(),
+                    details->Parent.empty() ? "-" : details->Parent.c_str(), Hex(details->Handle).c_str());
+                for (const Target::MonoField& field : details->Fields)
+                    std::printf("  field +0x%-4X %-40s %-28s code 0x%02X size %d\n", field.Offset, field.TypeName.c_str(), field.Name.c_str(), field.TypeCode, field.ValueSize);
+                for (const Target::MonoField& field : details->Statics)
+                    std::printf("  static      %-40s %-28s code 0x%02X\n", field.TypeName.c_str(), field.Name.c_str(), field.TypeCode);
+                for (const Target::MonoMethod& m : details->Methods)
+                    std::printf("  method %-16s %s(%d)%s\n", Hex(m.Address).c_str(), m.Name.c_str(), m.ParamCount, m.Static ? " static" : "");
+            }
+            std::printf("%zu class(es) matched \"%s\"; done; detaching\n", matched, classFilter.c_str());
+            return 0;
+        }
         const std::size_t show = std::min<std::size_t>(classes.size(), 18);
         for (std::size_t i = 0; i < show; ++i)
         {

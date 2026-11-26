@@ -151,6 +151,8 @@ namespace Manifold::Scan
     bool CompareAllowedFirst(Compare compare);
     bool CompareAllowedNext(Compare compare);
     bool CompareAvailable(ScanKind kind, Compare compare);
+    // A custom type that decodes its value (an ACTk type) has the number compares as well.
+    bool CompareAvailable(ScanKind kind, Compare compare, std::string_view customName);
     bool CompareUsesPrevious(Compare compare);
 
     struct ScanRecord

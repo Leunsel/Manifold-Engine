@@ -75,6 +75,8 @@ namespace Manifold::Lua
         bool String = false;
         std::function<std::optional<std::string>(std::span<const std::uint8_t> bytes)> NativeText;
         std::function<std::optional<std::vector<std::uint8_t>>(std::string_view text)> NativeBytes;
+        // A native type whose new bytes depend on the ones in memory (a key kept beside the value): it gets them, zeros without an address.
+        std::function<std::optional<std::vector<std::uint8_t>>(std::string_view text, std::span<const std::uint8_t> current)> NativeUpdate;
         std::shared_ptr<CustomTypeObject> Object = std::make_shared<CustomTypeObject>();
 
         int ByteCount() const;

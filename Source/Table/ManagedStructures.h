@@ -14,6 +14,8 @@ namespace Manifold::Table
     // pointerSize is the target's (4 in a 32-bit game): references and IntPtr fields are that wide.
     Scan::ValueType ManagedFieldType(int typeCode, int pointerSize, int& size, FieldDisplay& display);
     bool StoredInline(const Target::MonoField& field);
+    // The ACTk custom type for a field of an ACTk struct whose fields sit where Scan/Obscured.h expects them, else null.
+    const char* ObscuredFieldType(const Target::MonoField& field, const ManagedLayouts& nested, int pointerSize);
     void CollectManagedLayouts(Target::MonoBridge& mono, const std::vector<Target::MonoField>& fields, ManagedLayouts& nested, int depth = 0);
     void FillFromManaged(StructDefinition& target, std::vector<Target::MonoField> fields, int shift, const ManagedLayouts& nested, int pointerSize);
     // The fields of an array object: bounds, max_length and up to maxElements

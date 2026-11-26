@@ -30,6 +30,7 @@ namespace Manifold::Scan
             { "Unity ", "Unity" },
             { "Mono ", "Unity" },
             { "IL2CPP ", "Unity" },
+            { "ACTk ", "Unity Anti-Cheat Toolkit" },
         };
 
         std::string Bytes(int count)

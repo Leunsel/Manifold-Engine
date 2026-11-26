@@ -4,6 +4,7 @@
 #include "Core/Paths.h"
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
+#include "Scan/Obscured.h"
 #include "Scan/ScanStore.h"
 #include "Scan/Workers.h"
 #include "Target/Process.h"
@@ -115,9 +116,11 @@ namespace Manifold::Scan
                 m_floats = options.Floats;
                 if (m_kind == ScanKind::Grouped || m_kind == ScanKind::Custom)
                 {
-                    if (!CompareAvailable(m_kind, m_mode))
+                    if (!CompareAvailable(m_kind, m_mode, options.CustomName))
                         return Status::Fail(ErrorCode::ScanCompareUnavailable, CompareName(m_mode));
                     m_type = ValueType::ByteArray;
+                    if (m_kind == ScanKind::Custom && FindObscured(options.CustomName))
+                        return BuildObscured(options, pointerSize);
                     return m_kind == ScanKind::Grouped ? BuildGroup(options, pointerSize) : BuildCustom(options);
                 }
                 m_type = options.Type;
@@ -174,13 +177,20 @@ namespace Manifold::Scan
                 }
 
                 m_size = ValueSize(m_type, format);
+                m_numberType = m_type;
+                m_numberSize = m_size;
+                return ParseNumbers(options, options.Value, options.Value2, format);
+            }
+
+            Status ParseNumbers(const ScanOptions& options, const std::string& valueA, const std::string& valueB, const ValueFormat& format)
+            {
                 if (CompareNeedsValue(m_mode))
                 {
-                    if (TrimView(options.Value).empty())
+                    if (TrimView(valueA).empty())
                         return Status::Fail(ErrorCode::ScanNoValue);
                     const auto parse = [&](const std::string& text, double& asDouble, std::int64_t& asInteger) -> bool
                         {
-                            if (IsFloating(m_type) && !options.Hex)
+                            if (IsFloating(m_numberType) && !options.Hex)
                             {
                                 const auto value = ParseDouble(text);
                                 if (!value)
@@ -189,35 +199,35 @@ namespace Manifold::Scan
                                 asInteger = static_cast<std::int64_t>(*value);
                                 return true;
                             }
-                            const auto bytes = ParseValue(m_type, text, format);
+                            const auto bytes = ParseValue(m_numberType, text, format);
                             if (!bytes)
                                 return false;
-                            if (IsFloating(m_type))
+                            if (IsFloating(m_numberType))
                             {
-                                asDouble = *AsDouble(m_type, *bytes, true);
+                                asDouble = *AsDouble(m_numberType, *bytes, true);
                                 asInteger = static_cast<std::int64_t>(asDouble);
                                 return true;
                             }
                             std::uint64_t raw = 0;
                             std::memcpy(&raw, bytes->data(), std::min<std::size_t>(8, bytes->size()));
-                            asInteger = SignExtend(raw);
+                            asInteger = m_numberSigned ? SignExtend(raw) : static_cast<std::int64_t>(raw);
                             asDouble = static_cast<double>(asInteger);
                             return true;
                         };
-                    if (!parse(options.Value, m_doubleA, m_intA))
-                        return Status::Fail(ErrorCode::ScanBadValue, options.Value);
+                    if (!parse(valueA, m_doubleA, m_intA))
+                        return Status::Fail(ErrorCode::ScanBadValue, valueA);
                     if (CompareNeedsTwoValues(m_mode))
                     {
-                        if (!parse(options.Value2, m_doubleB, m_intB))
-                            return Status::Fail(ErrorCode::ScanBadValue, options.Value2);
+                        if (!parse(valueB, m_doubleB, m_intB))
+                            return Status::Fail(ErrorCode::ScanBadValue, valueB);
                         if (m_doubleA > m_doubleB)
                             std::swap(m_doubleA, m_doubleB);
                         if (m_intA > m_intB)
                             std::swap(m_intA, m_intB);
                     }
-                    const int decimals = IsFloating(m_type) && !options.Hex ? DecimalsOf(options.Value) : 0;
+                    const int decimals = IsFloating(m_numberType) && !options.Hex ? DecimalsOf(valueA) : 0;
                     m_step = std::pow(10.0, -decimals);
-                    if (options.Hex && IsFloating(m_type))
+                    if (options.Hex && IsFloating(m_numberType))
                         m_floats = FloatMode::Exact;
                 }
                 return Status::Success();
@@ -241,6 +251,34 @@ namespace Manifold::Scan
                 }
                 m_size = options.BlockSize;
                 return Status::Success();
+            }
+
+            Status BuildObscured(const ScanOptions& options, int pointerSize)
+            {
+                m_obscured = FindObscured(options.CustomName);
+                m_layout = ObscuredLayoutOf(m_obscured->Kind, pointerSize);
+                m_size = m_layout.Size;
+                if (options.CustomSize > 0 && options.CustomSize != m_size)
+                    return Status::Fail(ErrorCode::ScanCustomMissing, options.CustomName);
+                m_numberType = m_obscured->Plain;
+                m_numberSize = ObscuredComponentSize(*m_obscured);
+                m_numberSigned = m_obscured->Signed;
+                if (!ObscuredScalar(*m_obscured))
+                    return Status::Success();
+                const auto boolText = [&](const std::string& text) -> std::string
+                    {
+                        if (m_obscured->Kind != ObscuredKind::Bool)
+                            return text;
+                        if (EqualsNoCase(TrimView(text), "true"))
+                            return "1";
+                        if (EqualsNoCase(TrimView(text), "false"))
+                            return "0";
+                        return text;
+                    };
+                ValueFormat format;
+                format.Hex = options.Hex;
+                format.PointerSize = pointerSize;
+                return ParseNumbers(options, boolText(options.Value), boolText(options.Value2), format);
             }
 
             Status BuildCustom(const ScanOptions& options)
@@ -271,6 +309,8 @@ namespace Manifold::Scan
 
             bool Test(const std::uint8_t* now, const std::uint8_t* previous, const std::uint8_t* first) const
             {
+                if (m_obscured)
+                    return TestObscured(now, previous, first);
                 if (m_kind == ScanKind::Grouped)
                 {
                     switch (m_mode)
@@ -317,6 +357,44 @@ namespace Manifold::Scan
                 case ValueType::Pointer: return m_size == 4 ? TestInteger<std::int32_t>(now, previous, first) : TestInteger<std::int64_t>(now, previous, first);
                 case ValueType::Float: return TestFloat<float>(now, previous, first);
                 case ValueType::Double: return TestFloat<double>(now, previous, first);
+                default: return false;
+                }
+            }
+
+            // ∑ The struct in memory changes with every new key, the value does not: compares go to the decoded
+            //   value, and only a struct that reads as a set ACTk value counts, which keeps zeroed memory out.
+            bool TestObscured(const std::uint8_t* now, const std::uint8_t* previous, const std::uint8_t* first) const
+            {
+                std::uint8_t plainNow[16]{};
+                std::uint8_t plainPrevious[16]{};
+                std::uint8_t plainFirst[16]{};
+                if (ObscuredDecode(*m_obscured, m_layout, now, plainNow, true) != ObscuredState::Plain)
+                    return false;
+                if (NeedsPrevious() && ObscuredDecode(*m_obscured, m_layout, previous, plainPrevious, false) == ObscuredState::Invalid)
+                    return false;
+                if (m_mode == Compare::SameAsFirst && ObscuredDecode(*m_obscured, m_layout, first, plainFirst, false) == ObscuredState::Invalid)
+                    return false;
+                if (!ObscuredScalar(*m_obscured))
+                {
+                    const std::size_t size = static_cast<std::size_t>(ObscuredPlainSize(*m_obscured));
+                    switch (m_mode)
+                    {
+                    case Compare::Unknown: return true;
+                    case Compare::Changed: return std::memcmp(plainNow, plainPrevious, size) != 0;
+                    case Compare::Unchanged: return std::memcmp(plainNow, plainPrevious, size) == 0;
+                    case Compare::SameAsFirst: return std::memcmp(plainNow, plainFirst, size) == 0;
+                    default: return false;
+                    }
+                }
+                const bool sign = m_obscured->Signed;
+                switch (m_obscured->Plain)
+                {
+                case ValueType::Byte: return sign ? TestInteger<std::int8_t>(plainNow, plainPrevious, plainFirst) : TestInteger<std::uint8_t>(plainNow, plainPrevious, plainFirst);
+                case ValueType::TwoBytes: return sign ? TestInteger<std::int16_t>(plainNow, plainPrevious, plainFirst) : TestInteger<std::uint16_t>(plainNow, plainPrevious, plainFirst);
+                case ValueType::FourBytes: return sign ? TestInteger<std::int32_t>(plainNow, plainPrevious, plainFirst) : TestInteger<std::uint32_t>(plainNow, plainPrevious, plainFirst);
+                case ValueType::EightBytes: return sign ? TestInteger<std::int64_t>(plainNow, plainPrevious, plainFirst) : TestInteger<std::uint64_t>(plainNow, plainPrevious, plainFirst);
+                case ValueType::Float: return TestFloat<float>(plainNow, plainPrevious, plainFirst);
+                case ValueType::Double: return TestFloat<double>(plainNow, plainPrevious, plainFirst);
                 default: return false;
                 }
             }
@@ -550,7 +628,7 @@ namespace Manifold::Scan
 
             std::int64_t SignExtend(std::uint64_t raw) const
             {
-                switch (m_size)
+                switch (m_numberSize)
                 {
                 case 1: return static_cast<std::int8_t>(raw);
                 case 2: return static_cast<std::int16_t>(raw);
@@ -564,7 +642,7 @@ namespace Manifold::Scan
                 switch (m_floats)
                 {
                 case FloatMode::Exact:
-                    return m_type == ValueType::Float ? static_cast<float>(value) == static_cast<float>(wanted) : value == wanted;
+                    return m_numberType == ValueType::Float ? static_cast<float>(value) == static_cast<float>(wanted) : value == wanted;
                 case FloatMode::Truncated:
                     return wanted >= 0.0 ? (value >= wanted && value < wanted + m_step) : (value <= wanted && value > wanted - m_step);
                 case FloatMode::Rounded:
@@ -579,6 +657,11 @@ namespace Manifold::Scan
             FloatMode m_floats = FloatMode::Rounded;
             std::shared_ptr<const GroupSpec> m_group;
             int m_size = 4;
+            ValueType m_numberType = ValueType::FourBytes;
+            int m_numberSize = 4;
+            bool m_numberSigned = true;
+            const ObscuredType* m_obscured = nullptr;
+            ObscuredLayout m_layout;
             std::int64_t m_intA = 0;
             std::int64_t m_intB = 0;
             double m_doubleA = 0.0;
@@ -1002,6 +1085,16 @@ namespace Manifold::Scan
         return compare == Compare::Exact || compare == Compare::Unknown || compare == Compare::Changed || compare == Compare::Unchanged || compare == Compare::SameAsFirst;
     }
 
+    bool CompareAvailable(ScanKind kind, Compare compare, std::string_view customName)
+    {
+        if (kind == ScanKind::Custom)
+        {
+            if (const ObscuredType* obscured = FindObscured(customName))
+                return ObscuredScalar(*obscured) || compare == Compare::Unknown || compare == Compare::Changed || compare == Compare::Unchanged || compare == Compare::SameAsFirst;
+        }
+        return CompareAvailable(kind, compare);
+    }
+
     bool CompareUsesPrevious(Compare compare)
     {
         return compare == Compare::Increased || compare == Compare::IncreasedBy || compare == Compare::Decreased || compare == Compare::DecreasedBy ||
@@ -1058,7 +1151,7 @@ namespace Manifold::Scan
                 effective.Against = CompareTo::Previous;
             }
         }
-        if (!CompareAvailable(effective.Kind, effective.Mode))
+        if (!CompareAvailable(effective.Kind, effective.Mode, effective.CustomName))
             return Status::Fail(ErrorCode::ScanCompareUnavailable, CompareName(effective.Mode));
 
         if (effective.Kind == ScanKind::All)

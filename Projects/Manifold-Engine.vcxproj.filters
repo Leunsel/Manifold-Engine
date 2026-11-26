@@ -87,6 +87,9 @@
     <ClCompile Include="..\Source\App\Notifications.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
+    <ClCompile Include="..\Source\App\ObscuredTypes.cpp">
+      <Filter>Source\App</Filter>
+    </ClCompile>
     <ClCompile Include="..\Source\App\Palette.cpp">
       <Filter>Source\App</Filter>
     </ClCompile>
@@ -380,6 +383,9 @@
     </ClCompile>
     <ClCompile Include="..\Source\Lua\UiModel.cpp">
       <Filter>Source\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Source\Scan\Obscured.cpp">
+      <Filter>Source\Scan</Filter>
     </ClCompile>
     <ClCompile Include="..\Source\Scan\PointerScan.cpp">
       <Filter>Source\Scan</Filter>
@@ -774,6 +780,9 @@
     <ClInclude Include="..\Source\App\Notifications.h">
       <Filter>Source\App</Filter>
     </ClInclude>
+    <ClInclude Include="..\Source\App\ObscuredTypes.h">
+      <Filter>Source\App</Filter>
+    </ClInclude>
     <ClInclude Include="..\Source\App\Palette.h">
       <Filter>Source\App</Filter>
     </ClInclude>
@@ -1052,6 +1061,9 @@
     </ClInclude>
     <ClInclude Include="..\Source\Lua\UiModel.h">
       <Filter>Source\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Source\Scan\Obscured.h">
+      <Filter>Source\Scan</Filter>
     </ClInclude>
     <ClInclude Include="..\Source\Scan\PointerScan.h">
       <Filter>Source\Scan</Filter>

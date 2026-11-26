@@ -1,6 +1,11 @@
 #include "Table/ManagedStructures.h"
 
+#include "Scan/Obscured.h"
+
 #include <algorithm>
+#include <optional>
+#include <string_view>
+#include <utility>
 
 namespace Manifold::Table
 {
@@ -34,6 +39,38 @@ namespace Manifold::Table
     bool StoredInline(const Target::MonoField& field)
     {
         return field.ValueSize > 0 && field.EnumCode == 0 && field.TypeHandle && !field.TypeName.empty();
+    }
+
+    const char* ObscuredFieldType(const Target::MonoField& field, const ManagedLayouts& nested, int pointerSize)
+    {
+        const Scan::ObscuredType* type = Scan::FindObscuredClass(field.TypeName);
+        const auto found = nested.find(field.TypeName);
+        if (!type || found == nested.end())
+            return nullptr;
+        const auto offsetOf = [&](std::string_view name) -> std::optional<int>
+            {
+                for (const Target::MonoField& inner : found->second)
+                {
+                    if (inner.Name == name)
+                        return inner.Offset;
+                }
+                return std::nullopt;
+            };
+        // ∑ Only the layout this codec knows: another ACTk version that moved a field would be decoded wrong and,
+        //   worse, written wrong, so such a field stays the plain embedded struct.
+        const Scan::ObscuredLayout layout = Scan::ObscuredLayoutOf(type->Kind, pointerSize);
+        const auto key = offsetOf("currentCryptoKey");
+        if (!key || field.ValueSize < layout.Size)
+            return nullptr;
+        const std::pair<const char*, int> expected[] = { { "hiddenValue", layout.Hidden }, { "inited", layout.Inited }, { "fakeValue", layout.Fake },
+            { "fakeValueActive", layout.FakeActive } };
+        for (const auto& [name, offset] : expected)
+        {
+            const auto at = offsetOf(name);
+            if (!at || *at - *key != offset - layout.Key)
+                return nullptr;
+        }
+        return type->Name;
     }
 
     void CollectManagedLayouts(Target::MonoBridge& mono, const std::vector<Target::MonoField>& fields, ManagedLayouts& nested, int depth)
@@ -70,6 +107,8 @@ namespace Manifold::Table
                 member.Size = field.ValueSize;
                 if (const auto found = nested.find(field.TypeName); found != nested.end() && !found->second.empty())
                     member.ChildStructure = field.TypeName;
+                if (const char* obscured = ObscuredFieldType(field, nested, pointerSize))
+                    member.CustomType = obscured;
             }
             else if (field.TypeCode == 0x11)
             {

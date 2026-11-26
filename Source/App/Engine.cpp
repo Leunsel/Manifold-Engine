@@ -1,6 +1,7 @@
 #include "App/Engine.h"
 #include "Debug/VehProtocol.h"
 
+#include "App/ObscuredTypes.h"
 #include "App/Sounds.h"
 
 #include "Core/Paths.h"
@@ -34,6 +35,7 @@ namespace Manifold
         m_target.Symbols().Rebase().Load(settings.Rebases);
         m_lua = std::make_unique<Lua::LuaEngine>(*this);
         m_unreal.RegisterTypes(*m_lua);
+        RegisterObscuredTypes(*m_lua, 8);
         m_unreal.SetReadyHandler([this]() { m_lua->DispatchEvent("unrealReady"); });
         m_rtti.SetOtherEngines([this](std::uint64_t address) { return UnrealClaims(address) || m_lua->EngineScriptClaims(address); });
         m_debugger.SetLogDebugStrings(settings.LogDebugStrings);
@@ -248,6 +250,7 @@ namespace Manifold
         if (m_crashWatch.Attach(m_target.Process()))
             m_crashWatchWanted = true;
         m_rtti.ProcessOpened();
+        RegisterObscuredTypes(*m_lua, m_target.Process()->PointerSize());
         m_lua->OnProcessOpened();
         m_unreal.ProcessOpened();
         m_tables.RefreshValues(true);

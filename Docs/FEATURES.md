@@ -29,6 +29,7 @@ Manifold Engine reads and writes Cheat Engine tables (`.CT`): records, groups, p
 - [Autorun modules](#autorun-modules)
 - [Mono](#mono)
 - [IL2CPP](#il2cpp)
+- [Anti-Cheat Toolkit values](#anti-cheat-toolkit-values)
 - [.NET](#net)
 - [Unreal Engine](#unreal-engine)
 - [C++ RTTI](#c-rtti)
@@ -83,6 +84,8 @@ Finds several values that lie next to each other, written as `type:value` separa
 ### Custom types
 
 Types that scripts register (`registerCustomTypeLua`) appear in the value type list. They scan for an exact value, unknown initial value, changed, unchanged and same as first scan.
+
+The ACTk types (see [Anti-Cheat Toolkit values](#anti-cheat-toolkit-values)) scan with every compare a number has: they compare the decrypted value.
 
 ### Compare to
 
@@ -838,6 +841,18 @@ They work for IL2CPP too. An IL2CPP game cannot load a managed assembly, so a sm
 - Objects the explorer shows are kept alive with GC handles, exceptions stay inside `il2cpp_runtime_invoke`, and field values are read straight from memory.
 - What a game's build has stripped (for example `Object.FindObjectsOfType`) is reported as missing instead of being called.
 - It starts only when you switch the explorer on in the Mono window. The setting that starts the explorer by itself applies to Mono games.
+
+## Anti-Cheat Toolkit values
+
+Some Unity games keep their numbers in the value types of CodeStage's Anti-Cheat Toolkit (ACTk): `ObscuredInt`, `ObscuredFloat` and so on. Such a struct holds a key of its own and the value XOR'd with it, so a scan for the number you see in the game finds nothing.
+
+- **Types.** The value type lists have a section "Unity Anti-Cheat Toolkit" with `ACTk ObscuredInt`, `ObscuredUInt`, `ObscuredLong`, `ObscuredULong`, `ObscuredShort`, `ObscuredUShort`, `ObscuredByte`, `ObscuredSByte`, `ObscuredFloat`, `ObscuredDouble`, `ObscuredBool`, `ObscuredVector2`, `ObscuredVector3` and `ObscuredQuaternion`. The address of such a value is the start of the struct (its `currentCryptoKey`).
+- **Scanning.** The scanner decrypts every candidate and compares the plain value: exact, bigger, smaller, between, unknown, increased and decreased (by), changed, unchanged, same as first. The game may give a value a new key at any time; the struct's bytes change then, its value does not, and an Unchanged scan keeps it. A candidate only counts when it reads as an assigned ACTk value (the `inited` flag set, a key that is not 0). Vectors scan for unknown, changed, unchanged and same as first.
+- **The address list and Structure Dissect** show the plain value. A new value is written under the key that is already there; a struct that does not read as an ACTk value is not written to.
+- **The honeypot.** While ACTk's `ObscuredCheatingDetector` runs, the struct also holds the value in plain form (`fakeValue`, with `fakeValueActive` set), and the detector reports a change of that copy. A normal 4-byte scan finds this copy, so do not change it; write the ACTk type instead. A write through the ACTk type keeps the copy equal to the new value.
+- **Structure Dissect** gives a field of an ACTk struct its ACTk type by itself when the Mono or IL2CPP runtime is loaded, and the field can still be opened to see key, hidden value and flags.
+- **Layout.** The layout is the one of ACTk 2.x (with `hiddenValueOld` in float and double), checked in a 64-bit IL2CPP game. Structure Dissect only uses the type when the runtime's field offsets agree with it; another ACTk version stays an ordinary struct. `ObscuredString`, `ObscuredDecimal`, `ObscuredChar` and `ObscuredPrefs` are not decrypted.
+- ACTk's `SpeedHackDetector` and `TimeCheatingDetector` may notice the speedhack.
 
 ## .NET
 

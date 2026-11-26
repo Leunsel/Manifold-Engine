@@ -6,6 +6,7 @@
 #include "Generated/IconsFontAwesome5.h"
 #include "Layout/Layout.h"
 #include "Lua/LuaEngine.h"
+#include "Scan/Obscured.h"
 #include "UI/CodeEditor.h"
 #include "UI/Fonts.h"
 #include "UI/Loading.h"
@@ -1393,7 +1394,7 @@ namespace Manifold::UI
             m_workspace.Report(Status::Fail(ErrorCode::NoProcess));
             return;
         }
-        if (!Scan::CompareAllowedFirst(kCompares[m_compareIndex]) || !Scan::CompareAvailable(m_scanKind, kCompares[m_compareIndex]))
+        if (!Scan::CompareAllowedFirst(kCompares[m_compareIndex]) || !Scan::CompareAvailable(m_scanKind, kCompares[m_compareIndex], m_customName))
             m_compareIndex = 0;
         Scan::ScanOptions options = CurrentOptions();
         if (options.Kind == Scan::ScanKind::Custom)
@@ -1439,6 +1440,8 @@ namespace Manifold::UI
         options.CustomName = custom->Name;
         options.CustomSize = custom->ByteCount();
         options.CustomBytes.clear();
+        if (Scan::FindObscured(custom->Name))
+            return Status::Success();
         if (options.Mode == Scan::Compare::Exact)
         {
             if (TrimView(options.Value).empty())
@@ -1674,7 +1677,8 @@ namespace Manifold::UI
             return;
         }
         const Scan::ScanKind kind = scanned ? scanner.Kind() : m_scanKind;
-        if (!Scan::CompareAvailable(kind, kCompares[m_compareIndex]))
+        const std::string customName = scanned ? scanner.CustomName() : m_customName;
+        if (!Scan::CompareAvailable(kind, kCompares[m_compareIndex], customName))
             m_compareIndex = 0;
         const Scan::Compare compare = kCompares[m_compareIndex];
         const bool needsValue = Scan::CompareNeedsValue(compare) || (kind == Scan::ScanKind::Grouped && compare == Scan::Compare::Unknown && !scanned);
@@ -1724,7 +1728,7 @@ namespace Manifold::UI
         {
             for (int i = 0; i < static_cast<int>(std::size(kCompares)); ++i)
             {
-                const bool allowed = (scanned ? Scan::CompareAllowedNext(kCompares[i]) : Scan::CompareAllowedFirst(kCompares[i])) && Scan::CompareAvailable(kind, kCompares[i]);
+                const bool allowed = (scanned ? Scan::CompareAllowedNext(kCompares[i]) : Scan::CompareAllowedFirst(kCompares[i])) && Scan::CompareAvailable(kind, kCompares[i], customName);
                 if (!allowed)
                     continue;
                 if (ImGui::Selectable(Scan::CompareName(kCompares[i]), i == m_compareIndex))

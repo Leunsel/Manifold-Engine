@@ -122,6 +122,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\App\Engine.cpp" />
     <ClCompile Include="..\Source\App\ManagedSession.cpp" />
     <ClCompile Include="..\Source\App\Notifications.cpp" />
+    <ClCompile Include="..\Source\App\ObscuredTypes.cpp" />
     <ClCompile Include="..\Source\App\Palette.cpp" />
     <ClCompile Include="..\Source\App\RttiSession.cpp" />
     <ClCompile Include="..\Source\App\SessionBackup.cpp" />
@@ -220,6 +221,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClCompile Include="..\Source\Lua\UiForm.cpp" />
     <ClCompile Include="..\Source\Lua\UiFormImport.cpp" />
     <ClCompile Include="..\Source\Lua\UiModel.cpp" />
+    <ClCompile Include="..\Source\Scan\Obscured.cpp" />
     <ClCompile Include="..\Source\Scan\PointerScan.cpp" />
     <ClCompile Include="..\Source\Scan\ScanStore.cpp" />
     <ClCompile Include="..\Source\Scan\Scanner.cpp" />
@@ -355,6 +357,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\App\Engine.h" />
     <ClInclude Include="..\Source\App\ManagedSession.h" />
     <ClInclude Include="..\Source\App\Notifications.h" />
+    <ClInclude Include="..\Source\App\ObscuredTypes.h" />
     <ClInclude Include="..\Source\App\Palette.h" />
     <ClInclude Include="..\Source\App\RttiSession.h" />
     <ClInclude Include="..\Source\App\SessionBackup.h" />
@@ -448,6 +451,7 @@ python "$(ProjectDir)..\Tools\check_ui_raw.py"</Command>
     <ClInclude Include="..\Source\Lua\UiForm.h" />
     <ClInclude Include="..\Source\Lua\UiFormImport.h" />
     <ClInclude Include="..\Source\Lua\UiModel.h" />
+    <ClInclude Include="..\Source\Scan\Obscured.h" />
     <ClInclude Include="..\Source\Scan\PointerScan.h" />
     <ClInclude Include="..\Source\Scan\ScanStore.h" />
     <ClInclude Include="..\Source\Scan\Scanner.h" />
