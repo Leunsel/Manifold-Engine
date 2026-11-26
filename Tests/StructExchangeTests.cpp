@@ -247,6 +247,40 @@ namespace Manifold::Tests
             CHECK(ImportStructures("int x; void f();", {}).Error().Code == ErrorCode::StructNotFound);
         }
 
+        void CheckHugeArrays()
+        {
+            static constexpr std::string_view kTexts[] = {
+                "struct S { int a[1000000000]; int b; };",
+                "struct S { char a[0x20000000]; int b; };",
+                "struct S { int a[65536][65537]; int b; };",
+                "struct S { int a[0x100000001]; int b; };",
+                "struct S { struct Inner { int x; } a[65536][65537]; int b; };",
+                "struct S { void (*a[65536][65537])(); int b; };",
+            };
+            for (const std::string_view text : kTexts)
+            {
+                const StructImport imported = Import(text);
+                const StructDefinition* s = Named(imported.Structures, "S");
+                bool inside = s != nullptr;
+                const StructField* b = nullptr;
+                for (const StructField& field : s ? s->Fields : std::vector<StructField>())
+                {
+                    inside = inside && field.Offset >= 0 && field.Offset + field.Size <= kMaxFieldOffset;
+                    if (field.Name == "b")
+                        b = &field;
+                }
+                bool warned = false;
+                bool cut = false;
+                for (const std::string& warning : imported.Warnings)
+                {
+                    warned = warned || warning.find("b lies beyond") != std::string::npos;
+                    cut = cut || warning.find(": a ") != std::string::npos;
+                }
+                CHECK_MSG(inside && !b && warned, std::string(text) + " -> " + Offsets(s));
+                CHECK_MSG(At(s, 0, "a") && At(s, 0, "a")->Size == kMaxFieldBytes && cut, std::string(text) + " -> " + Offsets(s));
+            }
+        }
+
         // #11: function pointers and pointers to members. The expected numbers are
         // offsetof/sizeof from cl 19.4x (VS 2022) on the same text, x64 then x86.
         void CheckFunctionPointers()
@@ -469,6 +503,7 @@ namespace Manifold::Tests
             CheckRoundTripCpp();
             CheckMsvcLayout();
             CheckFunctionPointers();
+            CheckHugeArrays();
             CheckCSharp();
             CheckReClass();
             CheckMerge();

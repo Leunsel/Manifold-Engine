@@ -1163,14 +1163,14 @@ namespace Manifold::Table
                 {
                     int dimension = 0;
                     if (Peek().Kind == TokenKind::Number)
-                        dimension = static_cast<int>(Next().Value);
+                        dimension = static_cast<int>(std::min<std::int64_t>(Next().Value, kMaxFieldOffset));
                     else
                         Warn(line, "the length of " + result.Name + " is not a number");
                     while (!AtEnd() && !Is("]") && !Is(")"))
                         Next();
                     if (!Accept("]"))
                         return fail();
-                    result.Count = result.Count ? result.Count * dimension : dimension;
+                    result.Count = static_cast<int>(std::min<std::int64_t>(result.Count ? static_cast<std::int64_t>(result.Count) * dimension : dimension, kMaxFieldOffset));
                 }
                 if (!Accept(")"))
                     return fail();
@@ -1379,7 +1379,12 @@ namespace Manifold::Table
                 else
                     at = layout.Union ? 0 : AlignUp(layout.Offset, align);
                 m_fieldOffset.reset();
-                const int total = type.Size * std::max(count, 1);
+                if (at >= kMaxFieldOffset)
+                {
+                    Warn(line, Format("%s lies beyond the largest offset a dissect field can have (%X); it is left out", name.c_str(), kMaxFieldOffset));
+                    return;
+                }
+                const int total = static_cast<int>(std::min<std::int64_t>(static_cast<std::int64_t>(type.Size) * std::max(count, 1), kMaxFieldOffset - at));
                 Emit(parsed, type, name, at, count, line);
                 if (!layout.Union)
                     layout.Offset = std::max(layout.Offset, at + total);
@@ -1458,9 +1463,9 @@ namespace Manifold::Table
                     field.Name = name;
                     field.Type = Scan::ValueType::String;
                     field.Unicode = type.Kind == Basic::Char16;
-                    field.Size = std::clamp(type.Size * count, 1, kMaxFieldBytes);
+                    field.Size = static_cast<int>(std::clamp<std::int64_t>(static_cast<std::int64_t>(type.Size) * count, 1, kMaxFieldBytes));
                     parsed.Definition.Fields.push_back(field);
-                    if (type.Size * count > kMaxFieldBytes)
+                    if (static_cast<std::int64_t>(type.Size) * count > kMaxFieldBytes)
                         Warn(line, Format("%s is longer than a dissect field can be (%d bytes)", name.c_str(), kMaxFieldBytes));
                     return;
                 }
@@ -1484,9 +1489,9 @@ namespace Manifold::Table
                 field.Offset = at;
                 field.Name = name;
                 field.Type = Scan::ValueType::ByteArray;
-                field.Size = std::clamp(type.Size * count, 1, kMaxFieldBytes);
+                field.Size = static_cast<int>(std::clamp<std::int64_t>(static_cast<std::int64_t>(type.Size) * count, 1, kMaxFieldBytes));
                 parsed.Definition.Fields.push_back(field);
-                if (type.Size * count > kMaxFieldBytes)
+                if (static_cast<std::int64_t>(type.Size) * count > kMaxFieldBytes)
                     Warn(line, Format("%s (%d elements) is longer than a dissect field can be; it is cut to %d bytes", name.c_str(), count, kMaxFieldBytes));
             }
 
@@ -1614,13 +1619,13 @@ namespace Manifold::Table
                         {
                             int dimension = 0;
                             if (Peek().Kind == TokenKind::Number)
-                                dimension = static_cast<int>(Next().Value);
+                                dimension = static_cast<int>(std::min<std::int64_t>(Next().Value, kMaxFieldOffset));
                             else
                                 Warn(line, "the length of " + name + " is not a number");
                             while (!AtEnd() && !Is("]"))
                                 Next();
                             Accept("]");
-                            count = count ? count * dimension : dimension;
+                            count = static_cast<int>(std::min<std::int64_t>(count ? static_cast<std::int64_t>(count) * dimension : dimension, kMaxFieldOffset));
                         }
                     }
                     int bits = 0;
@@ -1742,7 +1747,10 @@ namespace Manifold::Table
                                 while (Accept("["))
                                 {
                                     if (Peek().Kind == TokenKind::Number)
-                                        count = count ? count * static_cast<int>(Next().Value) : static_cast<int>(Next().Value);
+                                    {
+                                        const std::int64_t dimension = std::min<std::int64_t>(Next().Value, kMaxFieldOffset);
+                                        count = static_cast<int>(std::min<std::int64_t>(count ? count * dimension : dimension, kMaxFieldOffset));
+                                    }
                                     while (!AtEnd() && !Is("]"))
                                         Next();
                                     Accept("]");
