@@ -1359,6 +1359,19 @@ int main(int argc, char** argv)
                 std::printf("unreal big object MyBigActor at %p (%d int properties)\n", reinterpret_cast<void*>(unreal.Fake.BigInstance), FakeUnreal::kBigFields);
             }
         }
+        else if (std::strcmp(argv[i], "--unreal-big-struct") == 0 || std::strcmp(argv[i], "--unreal-big-struct-broken") == 0)
+        {
+            // MyBigActor as a small class with one StructProperty Payload of BigStruct (the int properties): the
+            // struct is cut, not the class (#8). -broken: BigStruct's chain breaks after its middle property.
+            const bool broken = std::strcmp(argv[i], "--unreal-big-struct-broken") == 0;
+            static FakeUnreal::Builder unreal;
+            if (unreal.Build({ .BigClass = true, .BigFields = FakeUnreal::kBigFields, .BigStruct = true, .BrokenChain = broken }))
+            {
+                g_unrealFake = unreal.Fake;
+                std::printf("unreal big object MyBigActor at %p (Payload: BigStruct, %d int properties%s)\n", reinterpret_cast<void*>(unreal.Fake.BigInstance),
+                    FakeUnreal::kBigFields, broken ? ", chain broken after the middle one" : "");
+            }
+        }
         else if (std::strcmp(argv[i], "--unreal3") == 0 || std::strcmp(argv[i], "--unreal3-early") == 0)
         {
             // On the heap: a static builder's own pointer members in .data look like a TArray to the search.
