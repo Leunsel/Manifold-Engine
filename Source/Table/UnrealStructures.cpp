@@ -11,6 +11,8 @@ namespace Manifold::Table
     namespace
     {
         constexpr int kInlineDepth = 6;
+        // How many rows a fill collects beyond its limit before it stops working, so it can show the first rows by offset.
+        constexpr int kCollectBeyondLimit = 10 * kUnrealFieldLimit;
         constexpr int kStaticArrayLimit = 64;
         constexpr int kGapLimit = 0x1000;
         constexpr int kArrayPreview = 64;
@@ -84,7 +86,8 @@ namespace Manifold::Table
         public:
             Filler(const Target::UnrealRuntime& runtime, const Target::Process& process, std::uint64_t base, bool customTypes, NestedStructs& nested,
                 int limit = kUnrealFieldLimit)
-                : m_runtime(runtime), m_process(process), m_base(base), m_custom(customTypes), m_pointer(runtime.PointerSize()), m_limit(std::max(1, limit)), m_nested(nested)
+                : m_runtime(runtime), m_process(process), m_base(base), m_custom(customTypes), m_pointer(runtime.PointerSize()), m_limit(std::max(1, limit)),
+                  m_ceiling(m_limit + kCollectBeyondLimit), m_nested(nested)
             {
             }
 
@@ -95,7 +98,7 @@ namespace Manifold::Table
             void Add(int offset, std::string name, ValueType type, int width, FieldDisplay display = FieldDisplay::Unsigned, std::string custom = {}, int bit = -1,
                 std::string child = {})
             {
-                if (m_count >= m_limit)
+                if (m_count >= m_ceiling)
                 {
                     m_truncated = true;
                     return;
@@ -286,7 +289,7 @@ namespace Manifold::Table
             {
                 for (const Target::UnrealField& f : m_runtime.Fields(type))
                 {
-                    if (m_count >= m_limit)
+                    if (m_count >= m_ceiling)
                     {
                         m_truncated = true;
                         return;
@@ -318,9 +321,9 @@ namespace Manifold::Table
                     const int word = m_pointer;
                     live.assign(static_cast<std::size_t>(std::max(0, std::min(to, stop + word) - from)), 0);
                     const bool read = m_base && !live.empty() && m_process.ReadExact(m_base + static_cast<std::uint64_t>(from), live.data(), live.size());
-                    if (m_count >= m_limit && from < stop)
+                    if (m_count >= m_ceiling && from < stop)
                         m_truncated = true;
-                    for (int at = from; at < stop && m_count < m_limit;)
+                    for (int at = from; at < stop && m_count < m_ceiling;)
                     {
                         if (at % word == 0 && at + word <= to)
                         {
@@ -387,6 +390,13 @@ namespace Manifold::Table
                             return a.Offset < b.Offset;
                         return a.Order < b.Order;
                     });
+                // ∑ The cut comes after sorting: a cut fill is the first m_limit rows by offset, gaps included, so a
+                //   fill with a higher limit (Load More) starts with exactly the same rows.
+                if (m_specs.size() > static_cast<std::size_t>(m_limit))
+                {
+                    m_specs.resize(static_cast<std::size_t>(m_limit));
+                    m_truncated = true;
+                }
                 std::vector<StructField> fields;
                 fields.reserve(m_specs.size());
                 for (const Spec& spec : m_specs)
@@ -424,6 +434,7 @@ namespace Manifold::Table
             bool m_custom = true;
             int m_pointer = 8;
             int m_limit = kUnrealFieldLimit;
+            int m_ceiling = kUnrealFieldLimit;
             int m_count = 0;
             bool m_truncated = false;
             std::vector<Spec> m_specs;

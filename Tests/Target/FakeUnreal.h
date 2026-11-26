@@ -73,6 +73,7 @@ namespace FakeUnreal
         Word Package, ObjectClass, FieldClass, StructClass, ClassClass, PackageClass, ScriptStructClass, EnumClass;
         Word Vector, Vector2D, LinearColor, IntPoint, Actor, SceneComponent, GameEngineClass, Mode;
         Word ActorInstance, SceneInstance, Engine, TagData, Text;
+        Word BigClass, BigInstance;
     };
 
     using Image = ImageOf<std::uintptr_t>;
@@ -85,9 +86,14 @@ namespace FakeUnreal
         bool NarrowEnum = false;
         bool SplitEnum = false;
         bool NoMaxEnum = false;
+        // A class with kBigFields int properties, more rows than one Structure Dissect fill writes (issue #4).
+        bool BigClass = false;
     };
 
     inline constexpr int kLocationDouble = 0x120;
+    inline constexpr int kBigFields = 7000;
+    inline constexpr int kBigFirst = 0x100;
+    inline constexpr int kBigSize = kBigFirst + 4 * kBigFields;
 
     inline Pool g_pool;
     inline Array g_objects;
@@ -102,7 +108,7 @@ namespace FakeUnreal
 
         ~Builder()
         {
-            for (void* block : { m_names, m_objects, m_items, m_fields })
+            for (void* block : { m_names, m_objects, m_items, m_fields, m_bigFields, m_bigInstance })
             {
                 if (block)
                     ::VirtualFree(block, 0, MEM_RELEASE);
@@ -290,11 +296,15 @@ namespace FakeUnreal
             const wchar_t text[] = L"Hello";
             std::memcpy(reinterpret_cast<void*>(Fake.Text), text, sizeof(text));
 
+            const int bigInstanceIndex = kObjectCount - 1;
+            if (variant.BigClass && !BuildBig(o, bigInstanceIndex))
+                return false;
+
             const std::uintptr_t items = reinterpret_cast<std::uintptr_t>(m_items);
             const std::uintptr_t chunkTable = items + 0x10000 * static_cast<std::uintptr_t>(o.ItemSize);
             Put<std::uintptr_t>(chunkTable, 0, items);
             for (int i = 0; i < kObjectCount; ++i)
-                Put<std::uintptr_t>(items, i * o.ItemSize, Address(i));
+                Put<std::uintptr_t>(items, i * o.ItemSize, variant.BigClass && i == bigInstanceIndex ? Fake.BigInstance : Address(i));
             g_objects = { chunkTable, 0, 0x10000, kObjectCount, 1, 1 };
             g_pool.Blocks[0] = reinterpret_cast<std::uintptr_t>(m_names);
             g_pool.Cursor = static_cast<std::uint32_t>(m_used / 2);
@@ -356,6 +366,50 @@ namespace FakeUnreal
             return at;
         }
 
+        // BigActor (one filler slot before the last) with kBigFields int properties Value_0.., and its instance
+        // MyBigActor in a block of its own at the last slot, the property values counting up from 0.
+        bool BuildBig(const Offsets& o, int instanceIndex)
+        {
+            m_bigFields = Allocate(static_cast<std::size_t>(kBigFields) * kFieldStride + 0x1000);
+            m_bigInstance = Allocate(static_cast<std::size_t>(kBigSize) + 0x1000);
+            if (!m_bigFields || !m_bigInstance)
+                return false;
+            Fake.BigClass = Object(instanceIndex - 1, Name("BigActor"), 0);
+            Put<std::uintptr_t>(Fake.BigClass, o.Class, Fake.ClassClass);
+            Put<std::uintptr_t>(Fake.BigClass, o.Outer, Fake.Package);
+            Super(Fake.BigClass, Fake.ObjectClass);
+            Size(Fake.BigClass, kBigSize);
+
+            Fake.BigInstance = reinterpret_cast<std::uintptr_t>(m_bigInstance) + static_cast<std::uintptr_t>(o.ObjectBias);
+            Put<std::uintptr_t>(Fake.BigInstance, 0, reinterpret_cast<std::uintptr_t>(&g_vtable[0]));
+            Put<std::int32_t>(Fake.BigInstance, o.Index, instanceIndex);
+            Put<std::uint32_t>(Fake.BigInstance, o.Name, Name("MyBigActor"));
+            Put<std::uint32_t>(Fake.BigInstance, o.Name + 4, 0);
+            Put<std::uintptr_t>(Fake.BigInstance, o.Class, Fake.BigClass);
+            Put<std::uintptr_t>(Fake.BigInstance, o.Outer, Fake.Package);
+
+            const std::uintptr_t intClass = FieldClassNamed("IntProperty");
+            const std::uint32_t value = Name("Value");
+            std::uintptr_t next = 0;
+            for (int i = kBigFields - 1; i >= 0; --i)
+            {
+                const std::uintptr_t at = reinterpret_cast<std::uintptr_t>(m_bigFields) + static_cast<std::uintptr_t>(i) * kFieldStride;
+                Put<std::uintptr_t>(at, o.FieldClass, intClass);
+                Put<std::uintptr_t>(at, o.FieldOwner, Fake.BigClass);
+                Put<std::uintptr_t>(at, o.FieldNext, next);
+                Put<std::uint32_t>(at, o.FieldName, value);
+                Put<std::uint32_t>(at, o.FieldName + 4, static_cast<std::uint32_t>(i + 1));
+                Put<std::int32_t>(at, o.FieldDim, 1);
+                Put<std::int32_t>(at, o.FieldSize, 4);
+                Put<std::int32_t>(at, o.FieldOffset, kBigFirst + 4 * i);
+                Put<std::int32_t>(Fake.BigInstance, kBigFirst + 4 * i, i);
+                next = at;
+            }
+            Put<std::uintptr_t>(Fake.BigClass, o.ChildProperties, next);
+            g_pool.Cursor = static_cast<std::uint32_t>(m_used / 2);
+            return true;
+        }
+
         void Super(std::uintptr_t type, std::uintptr_t parent) { Put<std::uintptr_t>(type, kNative.Super, parent); }
         void Size(std::uintptr_t type, std::int32_t size) { Put<std::int32_t>(type, kNative.StructSize, size); }
 
@@ -386,6 +440,8 @@ namespace FakeUnreal
         std::uint8_t* m_objects = nullptr;
         std::uint8_t* m_items = nullptr;
         std::uint8_t* m_fields = nullptr;
+        std::uint8_t* m_bigFields = nullptr;
+        std::uint8_t* m_bigInstance = nullptr;
         std::size_t m_used = 0;
         std::size_t m_fieldUsed = 0;
         std::map<std::string, std::uint32_t> m_known;

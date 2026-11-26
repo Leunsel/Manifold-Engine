@@ -1349,6 +1349,16 @@ int main(int argc, char** argv)
             if (unreal.Build())
                 g_unrealFake = unreal.Fake;
         }
+        else if (std::strcmp(argv[i], "--unreal-big") == 0)
+        {
+            // The Unreal fake plus MyBigActor, a class with more rows than one Structure Dissect fill writes.
+            static FakeUnreal::Builder unreal;
+            if (unreal.Build({ .BigClass = true }))
+            {
+                g_unrealFake = unreal.Fake;
+                std::printf("unreal big object MyBigActor at %p (%d int properties)\n", reinterpret_cast<void*>(unreal.Fake.BigInstance), FakeUnreal::kBigFields);
+            }
+        }
         else if (std::strcmp(argv[i], "--unreal3") == 0 || std::strcmp(argv[i], "--unreal3-early") == 0)
         {
             // On the heap: a static builder's own pointer members in .data look like a TArray to the search.

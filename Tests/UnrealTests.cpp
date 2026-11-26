@@ -865,6 +865,32 @@ namespace Manifold::Tests
         VariantLayout(engine, { .Doubles = true, .SplitEnum = true }, "UE 5.7 split enum arrays");
         VariantLayout(engine, { .Doubles = true, .SplitEnum = true, .NoMaxEnum = true }, "UE 5.7 enum without _MAX");
         VariantLayout(engine, { .NoMaxEnum = true }, "enum without _MAX");
+        {
+            // Issue #4: a class with more rows than one fill writes is cut at the limit and says so; a fill with room for
+            // more starts with the same rows (so expanded rows and the selection stay) and is complete.
+            FakeUnreal::Builder builder;
+            CHECK(builder.Build({ .BigClass = true }));
+            const Fake fake = Widen(builder.Fake);
+            Target::UnrealRuntime runtime;
+            const Status status = runtime.Resolve(engine.Process(), Target::UnrealConfig{}, true, nullptr);
+            CHECK_MSG(status.Ok(), "big class: " + status.Text);
+            if (status)
+            {
+                CHECK(runtime.IsObject(fake.BigInstance) && runtime.ClassOf(fake.BigInstance) == fake.BigClass);
+                CHECK(runtime.Fields(fake.BigClass).size() == static_cast<std::size_t>(FakeUnreal::kBigFields));
+                const Table::UnrealFill first = Table::FillUnrealObject(runtime, fake.BigInstance, true);
+                CHECK_MSG(first.Truncated && first.Fields.size() == static_cast<std::size_t>(Table::kUnrealFieldLimit), "big class: " + std::to_string(first.Fields.size()) + " rows");
+                const Table::UnrealFill more = Table::FillUnrealObject(runtime, fake.BigInstance, true, 2 * Table::kUnrealFieldLimit);
+                CHECK_MSG(!more.Truncated && more.Fields.size() > static_cast<std::size_t>(FakeUnreal::kBigFields), "big class: " + std::to_string(more.Fields.size()) + " rows after Load More");
+                bool same = more.Fields.size() >= first.Fields.size();
+                for (std::size_t i = 0; same && i < first.Fields.size(); ++i)
+                    same = first.Fields[i].Name == more.Fields[i].Name && first.Fields[i].Offset == more.Fields[i].Offset;
+                CHECK_MSG(same, "big class: Load More keeps the rows that were there");
+                const auto last = std::find_if(more.Fields.begin(), more.Fields.end(), [](const Table::StructField& f) { return f.Name == "Value_6999"; });
+                CHECK(last != more.Fields.end() && last->Offset == FakeUnreal::kBigFirst + 4 * (FakeUnreal::kBigFields - 1));
+                CHECK(runtime.StructSize(fake.BigClass) == FakeUnreal::kBigSize);
+            }
+        }
         for (const bool early : { false, true })
         {
             FakeUnreal3::Builder builder;
