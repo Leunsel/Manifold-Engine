@@ -401,6 +401,80 @@ namespace Manifold::Tests
         }
     }
 
+    // The names Cheat Engine gives exports, on the exports TestTarget makes for
+    // them: shown names, aliases, an ordinal-only export, the reach.
+    void ExportNaming(Engine& engine, const Target::Process& process)
+    {
+        const auto module = process.FindModule("TestTarget.exe");
+        CHECK(module.has_value());
+        if (!module)
+            return;
+        const auto exported = [&](std::string_view name) { return process.FindExport(module->Name, name); };
+        const std::uint64_t alias = exported("_mfAliasA");
+        const std::uint64_t stdcall = exported("_mfStd@8");
+        const std::uint64_t member = exported("?mfMember@Widget@mf@@QEAAHH@Z");
+        const std::uint64_t underscore = exported("_mfTwin");
+        const std::uint64_t plain = exported("mfTwin");
+        const std::uint64_t low = exported("mfGapLow");
+        const std::uint64_t high = exported("mfGapHigh");
+        CHECK(alias && stdcall && member && underscore && plain && low && high);
+        CHECK_EQ(exported("_mfAliasB"), alias);
+        if (!alias || !stdcall || !member || !underscore || !plain || !low || !high)
+            return;
+        const auto offset = [&](std::uint64_t address) { return module->Name + "+" + Hex(address - module->Base); };
+        Target::Symbols& symbols = engine.Symbols();
+
+        CHECK_EQ(symbols.Describe(alias), std::string("TestTarget.mfAliasA"));
+        CHECK_EQ(symbols.Describe(alias + 1), std::string("TestTarget.mfAliasA+1"));
+        CHECK(symbols.ExactName(alias) == std::optional<std::string>("TestTarget.mfAliasA"));
+        const auto inside = symbols.Containing(alias + 2, 0x100);
+        CHECK(inside && inside->first == alias && inside->second == "TestTarget.mfAliasA");
+        CHECK_EQ(symbols.Describe(stdcall), std::string("TestTarget.mfStd"));
+        CHECK_EQ(symbols.Describe(member), std::string("TestTarget.mf::Widget::mfMember"));
+        CHECK_EQ(symbols.Describe(underscore), std::string("TestTarget.mfTwin"));
+        CHECK_EQ(symbols.Describe(plain), std::string("TestTarget.mfTwin"));
+
+        // Shown names resolve too, but a name in the export table wins.
+        CHECK_EQ(engine.Evaluate("TestTarget.mfAliasA").value_or(0), alias);
+        CHECK_EQ(engine.Evaluate("TestTarget._mfAliasA").value_or(0), alias);
+        CHECK_EQ(engine.Evaluate("mfAliasB").value_or(0), alias);
+        CHECK_EQ(engine.Evaluate("TestTarget.mfStd").value_or(0), stdcall);
+        CHECK_EQ(engine.Evaluate("TestTarget._mfStd@8").value_or(0), stdcall);
+        CHECK_EQ(engine.Evaluate("TestTarget.mf::Widget::mfMember").value_or(0), member);
+        CHECK_EQ(engine.Evaluate("TestTarget.mfTwin").value_or(0), plain);
+        CHECK_EQ(engine.Evaluate("mfTwin").value_or(0), plain);
+        CHECK_EQ(engine.Evaluate("TestTarget._mfTwin").value_or(0), underscore);
+
+        // An export with only an ordinal: OrdinalN, N decimal.
+        const std::vector<Target::ExportSymbol> exports = symbols.ExportsOf(*module);
+        const auto ordinal = std::find_if(exports.begin(), exports.end(), [](const Target::ExportSymbol& symbol) { return symbol.Name == "Ordinal4321"; });
+        CHECK(ordinal != exports.end());
+        if (ordinal != exports.end())
+        {
+            // ExportNameOrdinal: mov eax,5102 / ret
+            std::uint8_t code[6] = {};
+            CHECK(process.ReadExact(ordinal->Address, code, sizeof(code)) && code[0] == 0xB8 && code[1] == 0x02 && code[2] == 0x51 && code[5] == 0xC3);
+            CHECK_EQ(symbols.Describe(ordinal->Address), std::string("TestTarget.Ordinal4321"));
+            CHECK_EQ(engine.Evaluate("TestTarget.Ordinal4321").value_or(0), ordinal->Address);
+        }
+
+        // The reach: up to the next export, at most 64 KB (both ends included),
+        // nothing past the last export.
+        CHECK(high - low > 0x10000);
+        CHECK_EQ(symbols.Describe(low + 0x3000), std::string("TestTarget.mfGapLow+3000"));
+        CHECK_EQ(symbols.Describe(low + 0x10000), std::string("TestTarget.mfGapLow+10000"));
+        CHECK_EQ(symbols.Describe(low + 0x10001), offset(low + 0x10001));
+        const auto last = std::max_element(exports.begin(), exports.end(), [](const Target::ExportSymbol& a, const Target::ExportSymbol& b) { return a.Address < b.Address; });
+        CHECK(last != exports.end() && last->Reach == 0);
+        if (last != exports.end() && module->Contains(last->Address + 1))
+            CHECK_EQ(symbols.Describe(last->Address + 1), offset(last->Address + 1));
+        for (std::size_t i = 0; i + 1 < exports.size(); ++i)
+        {
+            if (exports[i + 1].Address != exports[i].Address)
+                CHECK_MSG(exports[i].Reach == std::min<std::uint64_t>(exports[i + 1].Address - exports[i].Address, 0x10000), exports[i].Name);
+        }
+    }
+
     int RunIntegrationTests(const std::filesystem::path& targetPath)
     {
         const int before = Totals().Failures;
@@ -459,6 +533,7 @@ namespace Manifold::Tests
             CHECK(inside && inside->first == *sleep);
             CHECK(!engine.Symbols().Containing(*sleep + 4, 4));
         }
+        ExportNaming(engine, process);
         CHECK(engine.Symbols().Register("containing_test_symbol", damage).Ok());
         {
             const auto registered = engine.Symbols().Containing(damage + 2, 0x100);

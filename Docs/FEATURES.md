@@ -259,6 +259,7 @@ As many windows as you like, each with its own File, Search, View, Debug and Too
   - every place a symbol starts (a registered symbol, an export, or a Mono method) gets a header line;
   - the instructions below it show their offset from that start (`+0`, `+3`, ...);
   - call and jump targets show their symbol names (also `mov r11, <method>` before an indirect call), and addresses read as module+offset;
+  - exports are named as Cheat Engine names them (`MSVCR100.wtoi` for `_wtoi`, `MSVCP140.std::_Xlength_error`, `shcore.Ordinal145`, up to 64 KB past an export; see [LUA-API.md](LUA-API.md#addresses-and-symbols));
   - when the listing starts inside a function, that function's name stays pinned as the first row while scrolling (a click goes to its start).
 
   Off shows plain addresses.

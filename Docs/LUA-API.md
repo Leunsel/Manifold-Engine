@@ -29,6 +29,14 @@ Scripts run on the program's main thread: in the Lua engine window (Ctrl+L), in 
 | `getNameFromAddress(address)` | `module.export+offset`, `module+offset` or hex |
 | `registerSymbol(name, address)` / `unregisterSymbol(name)` | boolean |
 
+Exports get the names Cheat Engine gives them, here and everywhere else in the program (memory view, disassembler, address texts):
+
+- C names lose one leading `_`, `@` or `?` and their `@` decoration: `MSVCR100._wtoi` shows as `MSVCR100.wtoi`, `__RTDynamicCast` as `_RTDynamicCast`, `_Sleep@4` as `Sleep`. C++ names show without their decoration: `?_Xlength_error@std@@YAXPEBD@Z` is `MSVCP140.std::_Xlength_error`.
+- An export with only an ordinal is `module.OrdinalN` (`shcore.Ordinal145`, N in decimal).
+- Several names on one function: the first in the export table names it.
+- An address after an export is `export+offset` up to the next export and at most 64 KB (`+10000`) past it. Past the last export of a module, and further than that, it is `module+offset`.
+- Both spellings resolve: `MSVCR100._wtoi` and `MSVCR100.wtoi`. A name as the export table writes it wins when another export shows the same name.
+
 ## Memory
 
 | Function | Notes |

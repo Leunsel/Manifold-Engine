@@ -29,8 +29,22 @@ namespace Manifold::Target
     struct ExportSymbol
     {
         std::uint64_t Address = 0;
+        // The name in the export table (_wtoi), or OrdinalN for an export that
+        // has only an ordinal.
         std::string Name;
+        // The name Cheat Engine shows for it (wtoi), see CheatEngineExportName.
+        std::string Shown;
+        // How many bytes past Address the name still reaches, Cheat Engine's
+        // symbol size: up to the next export, at most 64 KB, 0 for the last.
+        std::uint64_t Reach = 0;
     };
+
+    // The name Cheat Engine gives an export (what dbghelp makes of it with
+    // SYMOPT_UNDNAME): C++ names undecorated to the bare name
+    // (?_Xlength_error@std@@YAXPEBD@Z -> std::_Xlength_error), C names without
+    // one leading _, @ or ? and without their @-decoration (_wtoi -> wtoi,
+    // _Sleep@4 -> Sleep). Empty for a name Cheat Engine leaves out.
+    std::string CheatEngineExportName(std::string_view raw);
 
     struct Evaluation
     {
@@ -104,10 +118,14 @@ namespace Manifold::Target
         struct ExportTable
         {
             std::vector<ExportSymbol> ByAddress;
+            // Lower-case export table names, and the shown names that differ
+            // from them: a name in the table always wins over a shown one.
             std::unordered_map<std::string, std::uint64_t> ByName;
+            std::unordered_map<std::string, std::uint64_t> ByShown;
         };
 
         std::shared_ptr<const ExportTable> Exports(const ModuleInfo& module) const;
+        static const ExportSymbol* ExportAtOrBelow(const ExportTable& table, std::uint64_t address);
         std::optional<std::uint64_t> ResolveName(std::string_view name, const ExtraResolver& extra) const;
         std::optional<std::uint64_t> ResolveBuiltin(std::string_view name, const ExtraResolver& extra) const;
 

@@ -82,6 +82,32 @@ extern "C" __declspec(dllexport) __declspec(noinline) void Work(volatile long* v
 
 extern "C" __declspec(dllexport) __declspec(align(64)) volatile long long g_stress[4] = {};
 
+// Exports named the way compilers decorate them, for the names Cheat Engine
+// gives exports (Symbols::Describe): two names on one function, an export with
+// only an ordinal, a stdcall and a C++ name, a C name whose shown name is
+// another export's, and two data exports more than 64 KB apart.
+#if defined(_M_X64)
+extern "C" __declspec(noinline) int ExportNameAlias() { return 0x5101; }
+extern "C" __declspec(noinline) int ExportNameOrdinal() { return 0x5102; }
+extern "C" __declspec(noinline) int ExportNameStd() { return 0x5103; }
+extern "C" __declspec(noinline) int ExportNameMember() { return 0x5104; }
+extern "C" __declspec(noinline) int ExportNameUnderscore() { return 0x5105; }
+extern "C" __declspec(noinline) int ExportNamePlain() { return 0x5106; }
+#pragma section(".mfgap$a", read, write)
+#pragma section(".mfgap$b", read, write)
+extern "C" __declspec(allocate(".mfgap$a")) volatile unsigned char ExportGapLow[0x10100] = { 1 };
+extern "C" __declspec(allocate(".mfgap$b")) volatile unsigned char ExportGapHigh[0x10] = { 2 };
+#pragma comment(linker, "/EXPORT:_mfAliasB=ExportNameAlias")
+#pragma comment(linker, "/EXPORT:_mfAliasA=ExportNameAlias")
+#pragma comment(linker, "/EXPORT:mfOrdinal=ExportNameOrdinal,@4321,NONAME")
+#pragma comment(linker, "/EXPORT:_mfStd@8=ExportNameStd")
+#pragma comment(linker, "/EXPORT:?mfMember@Widget@mf@@QEAAHH@Z=ExportNameMember")
+#pragma comment(linker, "/EXPORT:_mfTwin=ExportNameUnderscore")
+#pragma comment(linker, "/EXPORT:mfTwin=ExportNamePlain")
+#pragma comment(linker, "/EXPORT:mfGapLow=ExportGapLow,DATA")
+#pragma comment(linker, "/EXPORT:mfGapHigh=ExportGapHigh,DATA")
+#endif
+
 // A tiny stand-in for the Mono runtime: enough exported mono_* functions, with
 // the same shapes the real ones have, to exercise the remote-call worker and
 // the enumeration path headlessly. Not a real Mono ABI, just the accessors the

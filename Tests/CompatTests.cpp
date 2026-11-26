@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -23,6 +24,7 @@
 #include <vector>
 
 #include <windows.h>
+#include <dbghelp.h>
 
 namespace Manifold::Tests
 {
@@ -348,6 +350,142 @@ namespace Manifold::Tests
             CHECK_EQ(symbols.Describe(0x7200), std::string("Gamma"));
             CHECK(symbols.Unregister("Gamma"));
             CHECK(!symbols.ExactName(0x7200));
+        }
+
+        // Cheat Engine's export names are dbghelp's (SYMOPT_UNDNAME); every pair
+        // was read from dbghelp, the odd ones from a test DLL built for it.
+        void ExportNames()
+        {
+            const std::pair<const char*, const char*> cases[] = {
+                { "_wtoi", "wtoi" },
+                { "_wstat64i32", "wstat64i32" },
+                { "_time64", "time64" },
+                { "__RTDynamicCast", "_RTDynamicCast" },
+                { "___three", "__three" },
+                { "_invalid_parameter_noinfo_noreturn", "invalid_parameter_noinfo_noreturn" },
+                { "GetTickCount", "GetTickCount" },
+                { "_StdFn@8", "StdFn" },
+                { "@FastFn@8", "FastFn" },
+                { "VecFn@@8", "VecFn" },
+                { "plain@12", "plain" },
+                { "_9num@4", "9num" },
+                { "_x@abc", "xabc" },
+                { "a@b@1", "ab" },
+                { "a@1b", "a" },
+                { "ab@@cd", "abcd" },
+                { "q@", "q" },
+                { "_@x", "x" },
+                { "__@5", "_" },
+                { "_", "" },
+                { "@lead", "lead" },
+                { "Ordinal145", "Ordinal145" },
+                { "?_Xlength_error@std@@YAXPEBD@Z", "std::_Xlength_error" },
+                { "??4?$_SpinWait@$00@details@Concurrency@@QEAAAEAV012@AEBV012@@Z", "Concurrency::details::_SpinWait<1>::operator=" },
+                { "??0Foo@@QEAA@XZ", "Foo::Foo" },
+                { "??_7Foo@@6B@", "Foo::`vftable'" },
+                { "??$f@H@@YAXH@Z", "f<int>" },
+                { "?x@@3HA", "x" },
+                { "?notreally", "notreally" },
+            };
+            for (const auto& [raw, shown] : cases)
+                CHECK_MSG(Target::CheatEngineExportName(raw) == shown, std::string(raw) + " -> " + Target::CheatEngineExportName(raw));
+        }
+
+        struct NamedRvas
+        {
+            std::map<DWORD, std::vector<std::string>> Names;
+            DWORD DirectoryRva = 0;
+            DWORD DirectorySize = 0;
+        };
+
+        BOOL CALLBACK CollectDbghelpName(PSYMBOL_INFO info, ULONG, PVOID context)
+        {
+            auto& found = *static_cast<NamedRvas*>(context);
+            const DWORD rva = static_cast<DWORD>(info->Address - info->ModBase);
+            if (info->NameLen && rva && rva - found.DirectoryRva >= found.DirectorySize)
+                found.Names[rva].emplace_back(info->Name, info->NameLen);
+            return TRUE;
+        }
+
+        // The names of every export, from the DLL's own export table run through
+        // CheatEngineExportName and from dbghelp the way Cheat Engine asks it,
+        // must be the same at every address.
+        void ExportNamesMatchDbghelp()
+        {
+            wchar_t system[MAX_PATH] = {};
+            ::GetSystemDirectoryW(system, MAX_PATH);
+            const HANDLE fake = reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(0x4D45584E));
+            const DWORD options = ::SymGetOptions();
+            ::SymSetOptions(SYMOPT_UNDNAME | SYMOPT_CASE_INSENSITIVE | SYMOPT_INCLUDE_32BIT_MODULES | SYMOPT_FAIL_CRITICAL_ERRORS | SYMOPT_NO_PROMPTS);
+            // A search path that does not exist: exports only, no PDB.
+            const std::filesystem::path nowhere = std::filesystem::temp_directory_path() / "manifold-no-symbols-here";
+            if (!::SymInitializeW(fake, nowhere.wstring().c_str(), FALSE))
+            {
+                ::SymSetOptions(options);
+                Skip("dbghelp could not start");
+                return;
+            }
+            int compared = 0;
+            for (const wchar_t* dll : { L"ucrtbase.dll", L"vcruntime140.dll", L"msvcp140.dll", L"kernel32.dll" })
+            {
+                const std::filesystem::path path = std::filesystem::path(system) / dll;
+                const HMODULE mapped = ::LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_AS_IMAGE_RESOURCE | LOAD_LIBRARY_AS_DATAFILE);
+                if (!mapped)
+                    continue;
+                const auto* image = reinterpret_cast<const std::uint8_t*>(reinterpret_cast<std::uintptr_t>(mapped) & ~std::uintptr_t(3));
+                const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(image + reinterpret_cast<const IMAGE_DOS_HEADER*>(image)->e_lfanew);
+                const IMAGE_DATA_DIRECTORY entry = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+                const auto* directory = reinterpret_cast<const IMAGE_EXPORT_DIRECTORY*>(image + entry.VirtualAddress);
+                const auto* functions = reinterpret_cast<const DWORD*>(image + directory->AddressOfFunctions);
+                const auto* names = reinterpret_cast<const DWORD*>(image + directory->AddressOfNames);
+                const auto* ordinals = reinterpret_cast<const WORD*>(image + directory->AddressOfNameOrdinals);
+                NamedRvas ours{ {}, entry.VirtualAddress, entry.Size };
+                std::vector<bool> named(directory->NumberOfFunctions, false);
+                const auto keep = [&](DWORD rva, const std::string& raw)
+                    {
+                        const std::string shown = Target::CheatEngineExportName(raw);
+                        if (rva && rva - entry.VirtualAddress >= entry.Size && !shown.empty())
+                            ours.Names[rva].push_back(shown);
+                    };
+                for (DWORD i = 0; i < directory->NumberOfNames; ++i)
+                {
+                    named[ordinals[i]] = true;
+                    keep(functions[ordinals[i]], reinterpret_cast<const char*>(image + names[i]));
+                }
+                for (DWORD i = 0; i < directory->NumberOfFunctions; ++i)
+                {
+                    if (!named[i])
+                        keep(functions[i], "Ordinal" + std::to_string(directory->Base + i));
+                }
+                ::FreeLibrary(mapped);
+
+                NamedRvas theirs{ {}, entry.VirtualAddress, entry.Size };
+                const DWORD64 base = 0x10000000;
+                if (::SymLoadModuleExW(fake, nullptr, path.c_str(), nullptr, base, 0, nullptr, 0))
+                {
+                    ::SymEnumSymbols(fake, base, nullptr, &CollectDbghelpName, &theirs);
+                    ::SymUnloadModule64(fake, base);
+                }
+                int differences = 0;
+                for (auto* list : { &ours, &theirs })
+                    for (auto& [rva, shown] : list->Names)
+                        std::sort(shown.begin(), shown.end());
+                for (const auto& [rva, shown] : ours.Names)
+                {
+                    const auto other = theirs.Names.find(rva);
+                    if (other == theirs.Names.end() || other->second != shown)
+                    {
+                        if (++differences <= 3)
+                            CHECK_MSG(false, WideToUtf8(dll) + "+" + Hex(rva) + ": " + shown.front() + " vs " + (other == theirs.Names.end() ? std::string("nothing") : other->second.front()));
+                    }
+                }
+                CHECK_MSG(ours.Names.size() == theirs.Names.size(), WideToUtf8(dll) + ": " + std::to_string(ours.Names.size()) + " addresses vs " + std::to_string(theirs.Names.size()));
+                CHECK_MSG(differences == 0, WideToUtf8(dll) + ": " + std::to_string(differences) + " addresses named differently");
+                compared += static_cast<int>(ours.Names.size());
+            }
+            ::SymCleanup(fake);
+            ::SymSetOptions(options);
+            CHECK_MSG(compared > 1000, "export addresses compared with dbghelp: " + std::to_string(compared));
         }
 
         void CallbackLimit(Engine& engine)
@@ -1397,6 +1535,8 @@ namespace Manifold::Tests
         CallbackLimit(engine);
         VisibleRefresh(engine);
         SymbolIndex(engine);
+        ExportNames();
+        ExportNamesMatchDbghelp();
         SymbolCallbacks(engine);
         Commands(engine);
         WithoutProcess(engine);

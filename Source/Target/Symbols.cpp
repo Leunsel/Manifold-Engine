@@ -3,15 +3,35 @@
 #include "Core/Text.h"
 
 #include <algorithm>
+#include <cstdlib>
 
 #include <windows.h>
+
+// The CRT's undecorator (vcruntime undname.cxx), behind its own lock.
+extern "C" char* __cdecl __unDName(char* buffer, const char* mangled, int length, void* (__cdecl* allocate)(std::size_t), void(__cdecl* release)(void*), unsigned short flags);
 
 namespace Manifold::Target
 {
     namespace
     {
-        constexpr std::uint64_t kExportReach = 0x2000;
+        // ∑ Cheat Engine caps a symbol's size at 64 KB (symbolhandler.pas, ES);
+        // an export's size is dbghelp's gap to the next export.
+        constexpr std::uint64_t kExportReach = 0x10000;
+        constexpr unsigned short kUndecorateNameOnly = 0x1000;
         constexpr int kMaxExpressionDepth = 64;
+
+        std::string StemOf(const ModuleInfo& module)
+        {
+            std::string stem = module.Name;
+            if (const std::size_t dot = stem.rfind('.'); dot != std::string::npos)
+                stem.resize(dot);
+            return stem;
+        }
+
+        std::string ShownName(const ModuleInfo& module, const ExportSymbol& symbol)
+        {
+            return StemOf(module) + "." + (symbol.Shown.empty() ? symbol.Name : symbol.Shown);
+        }
 
         class Parser
         {
@@ -345,6 +365,40 @@ namespace Manifold::Target
         };
     }
 
+    std::string CheatEngineExportName(std::string_view raw)
+    {
+        if (!raw.empty() && raw[0] == '?')
+        {
+            // ∑ dbghelp undecorates with UNDNAME_NAME_ONLY. The CRT's undecorator
+            // gives the same text (3,356 C++ exports of system DLLs compared) and,
+            // unlike dbghelp, may run while the PDB thread uses dbghelp.
+            const std::string text(raw);
+            char buffer[4096];
+            if (__unDName(buffer, text.c_str(), static_cast<int>(sizeof(buffer)), &std::malloc, &std::free, kUndecorateNameOnly))
+                return buffer;
+        }
+        // ∑ What dbghelp does with any other name, measured on a test DLL: one
+        // leading _, @ or ? goes, every other @ goes, and an @ before a digit
+        // ends the name (_Sleep@4, @Fast@8 and Vector@@16 lose their decoration;
+        // __RTDynamicCast keeps one underscore).
+        std::string_view rest = raw;
+        if (!rest.empty() && (rest[0] == '_' || rest[0] == '@' || rest[0] == '?'))
+            rest.remove_prefix(1);
+        std::string name;
+        name.reserve(rest.size());
+        for (std::size_t at = 0; at < rest.size(); ++at)
+        {
+            if (rest[at] != '@')
+            {
+                name += rest[at];
+                continue;
+            }
+            if (at + 1 < rest.size() && rest[at + 1] >= '0' && rest[at + 1] <= '9')
+                break;
+        }
+        return name;
+    }
+
     bool Symbols::IsNameChar(char c)
     {
         return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '!' || c == '@' || c == '?' ||
@@ -569,25 +623,63 @@ namespace Manifold::Target
                     std::vector<DWORD> names(sane ? directory->NumberOfNames : 0);
                     std::vector<WORD> ordinals(sane ? directory->NumberOfNames : 0);
                     const bool functionsRead = !functions.empty() && process.ReadExact(module.Base + directory->AddressOfFunctions, functions.data(), functions.size() * 4);
-                    const bool namesRead = !names.empty() && process.ReadExact(module.Base + directory->AddressOfNames, names.data(), names.size() * 4) &&
-                                           process.ReadExact(module.Base + directory->AddressOfNameOrdinals, ordinals.data(), ordinals.size() * 2);
+                    const bool namesRead = names.empty() || (process.ReadExact(module.Base + directory->AddressOfNames, names.data(), names.size() * 4) &&
+                                                             process.ReadExact(module.Base + directory->AddressOfNameOrdinals, ordinals.data(), ordinals.size() * 2));
                     if (functionsRead && namesRead)
                     {
+                        // Every address dbghelp lists for the module, forwarder
+                        // strings included: the reach of an export ends at the next.
+                        std::vector<std::uint64_t> bounds;
+                        std::vector<bool> named(functions.size(), false);
+                        const auto add = [&](std::uint64_t address, std::string name)
+                            {
+                                std::string shown = CheatEngineExportName(name);
+                                table->ByAddress.push_back({ address, std::move(name), std::move(shown), 0 });
+                            };
                         for (std::size_t i = 0; i < names.size(); ++i)
                         {
                             if (ordinals[i] >= functions.size() || !inBlock(names[i], 1))
                                 continue;
+                            named[ordinals[i]] = true;
                             const DWORD function = functions[ordinals[i]];
-                            if (function == 0 || inBlock(function, 1))
+                            if (function == 0)
+                                continue;
+                            bounds.push_back(module.Base + function);
+                            if (inBlock(function, 1))
                                 continue;
                             const char* text = reinterpret_cast<const char*>(block.data() + (names[i] - exportRva));
                             const std::size_t limit = block.size() - (names[i] - exportRva);
-                            const std::string name(text, strnlen(text, limit));
-                            const std::uint64_t address = module.Base + function;
-                            table->ByAddress.push_back({ address, name });
-                            table->ByName.emplace(Lower(name), address);
+                            add(module.Base + function, std::string(text, strnlen(text, limit)));
                         }
-                        std::sort(table->ByAddress.begin(), table->ByAddress.end(), [](const ExportSymbol& a, const ExportSymbol& b) { return a.Address < b.Address; });
+                        // ∑ An export with only an ordinal is OrdinalN to Cheat
+                        // Engine (dbghelp's name, N decimal). Empty slots (RVA 0)
+                        // dbghelp puts at the module base; they are no exports.
+                        for (std::size_t i = 0; i < functions.size(); ++i)
+                        {
+                            if (named[i] || functions[i] == 0)
+                                continue;
+                            bounds.push_back(module.Base + functions[i]);
+                            if (!inBlock(functions[i], 1))
+                                add(module.Base + functions[i], "Ordinal" + std::to_string(directory->Base + i));
+                        }
+                        // Stable: names at one address stay in name table order,
+                        // so the first is the alphabetically first (_wtoi before _wtol).
+                        std::stable_sort(table->ByAddress.begin(), table->ByAddress.end(), [](const ExportSymbol& a, const ExportSymbol& b) { return a.Address < b.Address; });
+                        std::sort(bounds.begin(), bounds.end());
+                        for (ExportSymbol& symbol : table->ByAddress)
+                        {
+                            const auto next = std::upper_bound(bounds.begin(), bounds.end(), symbol.Address);
+                            symbol.Reach = next == bounds.end() ? 0 : std::min(*next - symbol.Address, kExportReach);
+                            table->ByName.emplace(Lower(symbol.Name), symbol.Address);
+                        }
+                        for (const ExportSymbol& symbol : table->ByAddress)
+                        {
+                            if (symbol.Shown.empty() || symbol.Shown == symbol.Name)
+                                continue;
+                            std::string key = Lower(symbol.Shown);
+                            if (!table->ByName.contains(key))
+                                table->ByShown.emplace(std::move(key), symbol.Address);
+                        }
                     }
                 }
             }
@@ -610,8 +702,26 @@ namespace Manifold::Target
         if (!module)
             return 0;
         const auto table = Exports(*module);
-        const auto found = table->ByName.find(Lower(name));
-        return found == table->ByName.end() ? 0 : found->second;
+        const std::string key = Lower(name);
+        if (const auto found = table->ByName.find(key); found != table->ByName.end())
+            return found->second;
+        // The name Cheat Engine shows (MSVCR100.wtoi) resolves as well.
+        const auto shown = table->ByShown.find(key);
+        return shown == table->ByShown.end() ? 0 : shown->second;
+    }
+
+    const ExportSymbol* Symbols::ExportAtOrBelow(const ExportTable& table, std::uint64_t address)
+    {
+        auto found = std::upper_bound(table.ByAddress.begin(), table.ByAddress.end(), address,
+            [](std::uint64_t value, const ExportSymbol& symbol) { return value < symbol.Address; });
+        if (found == table.ByAddress.begin())
+            return nullptr;
+        --found;
+        // Several names at one address: the first one names it (Cheat Engine
+        // showed wtoi for _wtoi and _wtol).
+        while (found != table.ByAddress.begin() && std::prev(found)->Address == found->Address)
+            --found;
+        return &*found;
     }
 
     std::optional<std::uint64_t> Symbols::Resolve(std::string_view name) const
@@ -683,11 +793,17 @@ namespace Manifold::Target
         {
             const std::string key = Lower(name);
             const ModuleList modules = m_process->Modules();
-            for (const ModuleInfo& module : *modules)
+            // Export table names of every module first, so a shown name never
+            // takes a word that resolved before.
+            for (const bool shown : { false, true })
             {
-                const auto table = Exports(module);
-                if (const auto found = table->ByName.find(key); found != table->ByName.end())
-                    return found->second;
+                for (const ModuleInfo& module : *modules)
+                {
+                    const auto table = Exports(module);
+                    const auto& map = shown ? table->ByShown : table->ByName;
+                    if (const auto found = map.find(key); found != map.end())
+                        return found->second;
+                }
             }
         }
         return std::nullopt;
@@ -708,15 +824,8 @@ namespace Manifold::Target
         if (address == module->Base)
             return module->Name;
         const auto table = Exports(*module);
-        const auto found = std::lower_bound(table->ByAddress.begin(), table->ByAddress.end(), address,
-            [](const ExportSymbol& symbol, std::uint64_t value) { return symbol.Address < value; });
-        if (found != table->ByAddress.end() && found->Address == address)
-        {
-            std::string moduleName = module->Name;
-            if (const std::size_t dot = moduleName.rfind('.'); dot != std::string::npos)
-                moduleName.resize(dot);
-            return moduleName + "." + found->Name;
-        }
+        if (const ExportSymbol* found = ExportAtOrBelow(*table, address); found && found->Address == address)
+            return ShownName(*module, *found);
         return std::nullopt;
     }
 
@@ -749,16 +858,8 @@ namespace Manifold::Target
             return best;
         consider(module->Base, module->Name);
         const auto table = Exports(*module);
-        auto found = std::upper_bound(table->ByAddress.begin(), table->ByAddress.end(), address,
-            [](std::uint64_t value, const ExportSymbol& symbol) { return value < symbol.Address; });
-        if (found != table->ByAddress.begin())
-        {
-            --found;
-            std::string moduleName = module->Name;
-            if (const std::size_t dot = moduleName.rfind('.'); dot != std::string::npos)
-                moduleName.resize(dot);
-            consider(found->Address, moduleName + "." + found->Name);
-        }
+        if (const ExportSymbol* found = ExportAtOrBelow(*table, address))
+            consider(found->Address, ShownName(*module, *found));
         return best;
     }
 
@@ -893,24 +994,18 @@ namespace Manifold::Target
             if (address == module->Base)
                 return module->Name;
             const auto table = Exports(*module);
-            auto found = std::upper_bound(table->ByAddress.begin(), table->ByAddress.end(), address,
-                [](std::uint64_t value, const ExportSymbol& symbol) { return value < symbol.Address; });
-            if (found != table->ByAddress.begin())
+            if (const ExportSymbol* found = ExportAtOrBelow(*table, address))
             {
-                --found;
-                if (address - found->Address < kExportReach)
-                {
-                    std::string moduleName = module->Name;
-                    if (const std::size_t dot = moduleName.rfind('.'); dot != std::string::npos)
-                        moduleName.resize(dot);
-                    std::string text = moduleName + "." + found->Name;
-                    if (address == found->Address)
-                        return text;
-                    // Only the nearest export below: the provider may know the
-                    // function itself (a PDB name, or an IL2CPP method in
-                    // GameAssembly.dll next to the il2cpp_* exports).
-                    nearExport = text + "+" + Hex(address - found->Address);
-                }
+                if (address == found->Address)
+                    return ShownName(*module, *found);
+                // ∑ Cheat Engine's FindAddress: a symbol names start..start+size,
+                // both ends included, and an export's size is the gap to the next
+                // one (at most 64 KB; the last export has none).
+                // Only the nearest export below: the provider may know the
+                // function itself (a PDB name, or an IL2CPP method in
+                // GameAssembly.dll next to the il2cpp_* exports).
+                if (address - found->Address <= found->Reach)
+                    nearExport = ShownName(*module, *found) + "+" + Hex(address - found->Address);
             }
         }
         // No export at the address. Ask the symbol provider: for an in-module
