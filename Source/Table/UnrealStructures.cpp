@@ -256,6 +256,12 @@ namespace Manifold::Table
                         Target::kUnrealObjectIndexType);
                     return;
                 }
+                if (kind == "DelegateProperty" && m_runtime.Layout().Ue3)
+                {
+                    Add(offset, Annotated(name + ".Object", "FScriptDelegate"), ValueType::Pointer, m_pointer);
+                    Add(offset + m_pointer, name + ".FunctionName", m_custom ? ValueType::ByteArray : ValueType::EightBytes, 8, FieldDisplay::Hex, Target::kUnrealFNameType);
+                    return;
+                }
                 if (kind == "DelegateProperty")
                 {
                     Add(offset, Annotated(name + ".Object", "FScriptDelegate"), m_custom ? ValueType::ByteArray : ValueType::FourBytes, m_custom ? 8 : 4, FieldDisplay::Unsigned,

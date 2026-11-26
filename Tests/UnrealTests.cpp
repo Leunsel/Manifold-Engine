@@ -194,6 +194,17 @@ namespace Manifold::Tests
             store.Find("FVector")->Fields.resize(1);
             Table::AddUnrealStructures(store, fill, "MyActor");
             CHECK_MSG(store.Find("FVector")->Fields.size() == 1, label + ": a structure the user already has is kept");
+
+            const Table::UnrealFill controller = Table::FillUnrealObject(runtime, fake.ControllerInstance, true);
+            const auto row = [&](const std::string& prefix)
+                { return std::find_if(controller.Fields.begin(), controller.Fields.end(), [&](const Table::StructField& f) { return f.Name.rfind(prefix, 0) == 0; }); };
+            const auto object = row("OnTouch.Object");
+            const auto function = row("OnTouch.FunctionName");
+            CHECK_MSG(object != controller.Fields.end() && object->Offset == kOnTouch && object->Type == Scan::ValueType::Pointer && object->Size == o.Pointer &&
+                object->CustomType.empty(), label + ": UE3 delegate Object is a UObject* at " + Hex(kOnTouch, 0) + ", got " +
+                (object == controller.Fields.end() ? std::string("none") : Hex(object->Offset, 0) + " size " + std::to_string(object->Size) + " custom " + object->CustomType));
+            CHECK_MSG(function != controller.Fields.end() && function->Offset == kOnTouch + o.Pointer && function->CustomType == Target::kUnrealFNameType,
+                label + ": UE3 delegate FunctionName at " + Hex(kOnTouch + o.Pointer, 0) + ", got " + (function == controller.Fields.end() ? std::string("none") : Hex(function->Offset, 0)));
         }
 
         void Ue3SessionAndLua(Engine& engine, const Fake3& fake)
