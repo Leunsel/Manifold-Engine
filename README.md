@@ -96,7 +96,7 @@ Coming from Cheat Engine? Your tables, Auto Assembler scripts, Lua scripts, temp
 - **Address list**: groups, pointers, freezing, hotkeys, drop-down values, and Cheat Engine's group options.
 - **Memory viewer and debugger**: disassembler with symbols and jump arrows, a flow graph per function, write history with undo, conditional breakpoints that run inside the target, tracing, and "find out what accesses / writes".
 - **Structure Dissect** that names objects by their class in Mono, IL2CPP, .NET and Unreal Engine games, and C++ objects by their RTTI.
-- **Game engines built in**: Mono and IL2CPP (Unity) with classes, methods and a scene explorer, .NET Framework and .NET games (such as Terraria) read from outside the game, and Unreal Engine 4 and 5 without an SDK or game offsets.
+- **Game engines built in**: Mono and IL2CPP (Unity) with classes, methods and a scene explorer, .NET Framework and .NET games (such as Terraria) read from outside the game, and Unreal Engine 3, 4 and 5 without an SDK or game offsets.
 - **Scripting**: Cheat Engine's Auto Assembler, templates, and Lua 5.4 with the Cheat Engine API, plus the program's own `manifold` API with script windows drawn in the program's look and a Form Editor to lay them out.
 - **Made for long sessions**: error codes that explain themselves, a log window for debugging, session backups, a profiler, and the keyboard shortcuts of Cheat Engine 7.5.
 
@@ -189,7 +189,7 @@ It hooks `QueryPerformanceCounter`, `GetTickCount`, `GetTickCount64` and `timeGe
 | **Unity, Mono** | classes, methods and field offsets from the runtime; `Assembly-CSharp:Player:TakeDamage` resolves to the compiled method; a scene explorer and object inspector on the game's main thread | Extensions → Unity (Mono / IL2CPP), Mono / .NET window (`Ctrl+Alt+M`), `mono_*` Lua functions |
 | **Unity, IL2CPP** | the same through the `il2cpp_*` functions: classes, methods with their code addresses, field offsets, and the scene explorer | the same menu, window and functions; `mono_isIl2Cpp()` tells them apart |
 | **.NET** | .NET Framework and .NET 5 and later, read from outside the game by a helper process: classes, static fields as `Class:Field`, compiled methods, the GC heap and its objects | Extensions → .NET, the Mono / .NET window, `manifold.dotnet` |
-| **Unreal Engine 4 and 5** | names, objects and reflection found in the running game without an SDK or offsets; real class layouts in Structure Dissect, `UE FName` and `UE FString` types, `Actor_RootComponent`-style symbols, a class browser | Extensions → Unreal Engine (`Ctrl+Alt+U`), `manifold.unreal` |
+| **Unreal Engine 3, 4 and 5** | names, objects and reflection found in the running game without an SDK or offsets, 64-bit and 32-bit; real class layouts in Structure Dissect with structs embedded, `UE FName` and `UE FString` types, `Actor_RootComponent`-style symbols, a class browser | Extensions → Unreal Engine (`Ctrl+Alt+U`), `manifold.unreal` |
 | **C++ RTTI** | class names of MSVC and clang-cl programs in Structure Dissect, `<Class>::vftable` symbols, base classes and instances | Extensions → C++ RTTI, `manifold.rtti` |
 | **Godot 4** | StringNames, ObjectDB, ClassDB, the scene tree and method symbols | the `Manifold-Godot` autorun module |
 
