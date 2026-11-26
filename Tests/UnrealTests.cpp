@@ -1123,6 +1123,39 @@ namespace Manifold::Tests
                     "UE3 function locals: " + (destroy != functions.end() ? std::to_string(destroy->Parameters.size()) + " parameters" : std::string("no Destroy")));
             }
         }
+        {
+            FakeUnreal3::Builder builder;
+            CHECK(builder.Build(false));
+            const Fake3 fake = Widen3(builder.Fake);
+            const FakeUnreal3::Offsets& o = FakeUnreal3::Native(false);
+            std::optional<Target::UnrealField> owner;
+            {
+                Target::UnrealRuntime first;
+                if (first.Resolve(engine.Process(), Target::UnrealConfig{}, true, nullptr).Ok())
+                    owner = first.FindField(fake.Actor, "Owner");
+            }
+            CHECK_MSG(owner.has_value(), "UE3 static array: Owner");
+            if (owner)
+            {
+                const std::int32_t dim = 2;
+                std::memcpy(reinterpret_cast<void*>(static_cast<std::uintptr_t>(owner->Address) + o.ArrayDim), &dim, sizeof(dim));
+                const std::uintptr_t second = static_cast<std::uintptr_t>(fake.PawnInstance);
+                std::memcpy(reinterpret_cast<void*>(static_cast<std::uintptr_t>(fake.ActorInstance) + FakeUnreal3::kOwner + o.Pointer), &second, sizeof(second));
+                Target::UnrealRuntime runtime;
+                const Status status = runtime.Resolve(engine.Process(), Target::UnrealConfig{}, true, nullptr);
+                CHECK_MSG(status.Ok(), "UE3 static array: " + status.Text);
+                if (status)
+                {
+                    const auto walk = runtime.Walk(fake.ActorInstance, "A", { "Owner[1]", "Health" });
+                    CHECK_MSG(walk.Ok() && walk->Address == fake.PawnInstance + FakeUnreal3::kHealth && walk->Expression == Format("[A+Actor_Owner+%X]+Actor_Health", o.Pointer),
+                        "UE3 static array: " + (walk.Ok() ? walk->Expression + " at " + Hex(walk->Address, 0) + ", expected " + Hex(fake.PawnInstance + FakeUnreal3::kHealth, 0) : walk.Error().Text));
+                    const auto first = runtime.Walk(fake.ActorInstance, "A", { "Owner[0]", "Health" });
+                    CHECK_MSG(first.Ok() && first->Address == fake.ControllerInstance + FakeUnreal3::kHealth, "UE3 static array: Owner[0]");
+                    CHECK_MSG(!runtime.Walk(fake.ActorInstance, "A", { "Owner[2]" }).Ok(), "UE3 static array: Owner[2] is past the end");
+                    CHECK_MSG(!runtime.Walk(fake.ActorInstance, "A", { "Health[1]" }).Ok(), "UE3 static array: Health has one element");
+                }
+            }
+        }
         engine.CloseProcess();
         SyntheticTarget(target.parent_path() / L"TestTarget32.exe", FakeUnreal::kOffsets32, "32-bit target");
         SyntheticTarget(target.parent_path() / L"TestTarget.exe", FakeUnreal::kOffsets64, "64-bit target");

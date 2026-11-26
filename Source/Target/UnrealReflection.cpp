@@ -1102,6 +1102,15 @@ namespace Manifold::Target
             walk.Field = f;
             walk.Address += static_cast<std::uint64_t>(f->Start());
             walk.Expression += "+" + OffsetSymbol(f->Owner, f->Name);
+            if (index && f->Type != "ArrayProperty")
+            {
+                if (*index >= f->Dim)
+                    return Status::Fail(ErrorCode::UnrealNoProperty, NameOf(type).value_or("?") + "." + steps[i] + " (the property has " + std::to_string(f->Dim) + " elements)");
+                const std::uint64_t offset = static_cast<std::uint64_t>(*index) * static_cast<std::uint64_t>(f->Size);
+                walk.Address += offset;
+                if (offset)
+                    walk.Expression += Format("+%llX", static_cast<unsigned long long>(offset));
+            }
             bool isObject = IsObjectProperty(f->Type);
             bool isStruct = f->Type == "StructProperty";
             if (isStruct)
