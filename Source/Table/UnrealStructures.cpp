@@ -307,7 +307,11 @@ namespace Manifold::Table
                 for (int i = 0; i < dim; ++i)
                 {
                     const std::string name = prefix + f.Name + (f.Dim > 1 ? "[" + std::to_string(i) + "]" : std::string());
-                    Value(f, base + f.Offset + i * std::max(1, f.Size), name, depth);
+                    const int offset = base + f.Offset + i * std::max(1, f.Size);
+                    const std::size_t first = m_specs.size();
+                    Value(f, offset, name, depth);
+                    if (m_specs.size() > first)
+                        m_specs[first].Cover = std::max(m_specs[first].Cover, offset + std::max(1, f.Size) - m_specs[first].Offset);
                 }
             }
 

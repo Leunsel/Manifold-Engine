@@ -1080,6 +1080,34 @@ namespace Manifold::Tests
             }
         }
         BigChains(engine);
+        {
+            FakeUnreal::Builder builder;
+            CHECK(builder.Build({ .Containers = true }));
+            const Fake fake = Widen(builder.Fake);
+            Target::UnrealRuntime runtime;
+            const Status status = runtime.Resolve(engine.Process(), Target::UnrealConfig{}, true, nullptr);
+            CHECK_MSG(status.Ok(), "containers: " + status.Text);
+            if (status)
+            {
+                for (const bool custom : { true, false })
+                {
+                    const std::string label = custom ? "containers, custom types" : "containers, no custom types";
+                    const Table::UnrealFill fill = Table::FillUnrealObject(runtime, fake.SceneInstance, custom);
+                    const auto at = [&](const std::string& name, int offset)
+                        { return std::any_of(fill.Fields.begin(), fill.Fields.end(), [&](const Table::StructField& f) { return f.Name.rfind(name, 0) == 0 && f.Offset == offset; }); };
+                    CHECK_MSG(at("Lookup.Elements", FakeUnreal::kLookup) && at("Title", 0x80) && at("Mesh", 0x98) && at("Partner", 0xC0) && at("Label", 0xD0) &&
+                        at("OnHit.Object", 0xE0) && at("Target", 0xF0), label);
+                    std::string inside;
+                    for (const Table::StructField& f : fill.Fields)
+                    {
+                        if (f.Name == "(not reflected)" && f.Offset >= FakeUnreal::kLookup && f.Offset < FakeUnreal::kContainersEnd)
+                            inside += " " + Hex(f.Offset, 0);
+                    }
+                    CHECK_MSG(inside.empty(), label + ": \"(not reflected)\" rows inside properties at" + inside);
+                    CHECK_MSG(at("(not reflected)", FakeUnreal::kContainersEnd), label + ": the gap after the last property is still shown");
+                }
+            }
+        }
         for (const bool early : { false, true })
         {
             FakeUnreal3::Builder builder;
