@@ -7094,10 +7094,10 @@ define(unreal, "functions", {
     { name = "type", type = "string|integer" },
     { name = "inherited", type = "boolean", optional = true },
   },
-  returns = "list of `{ name, owner, address, flags, parameters }`, or nil, error",
-  doc = "The UFunctions a class declares, and with `inherited` its parents' too. `parameters` are fields; the return value is the one with the return flag (`0x400` in `flags`).",
+  returns = "list of `{ name, owner, address, flags, parameters }`, complete; or nil, error",
+  doc = "The UFunctions a class declares, and with `inherited` its parents' too. `parameters` are fields; the return value is the one with the return flag (`0x400` in `flags`). `complete` is false when a class's child list was not read to its end (more entries than the reader takes, or a broken link): the list then misses functions.",
 }, function(type, inherited)
-  return result(native.unrealFunctions(type, inherited == true))
+  return many(native.unrealFunctions(type, inherited == true))
 end)
 
 define(unreal, "enum", {
@@ -7322,12 +7322,12 @@ end)
 
 define(rtti, "label", {
   params = {
-    { name = "structure", type = "any" },
+)MLUA"),
+            std::string_view(R"MLUA(    { name = "structure", type = "any" },
     { name = "address", type = "address" },
   },
   returns = "number of labelled fields, or nil, error",
-)MLUA"),
-            std::string_view(R"MLUA(  doc = "What Structure Dissect does after its guess, for a structure that already exists (a Cheat Engine structure object): pointer fields without a name of their own are named `vftable`, `vftable (Base)`, `<Class> vftable`, `<Class>*` or `vbtable`, member objects with a table of another class become embedded structures named after that class, and a structure laid over a virtual function table gets `virtual N`. 0 when the address is neither an object's start nor a table.",
+  doc = "What Structure Dissect does after its guess, for a structure that already exists (a Cheat Engine structure object): pointer fields without a name of their own are named `vftable`, `vftable (Base)`, `<Class> vftable`, `<Class>*` or `vbtable`, member objects with a table of another class become embedded structures named after that class, and a structure laid over a virtual function table gets `virtual N`. 0 when the address is neither an object's start nor a table.",
 }, function(structure, address)
   return result(native.rttiLabel(structure, address))
 end)
@@ -7497,14 +7497,14 @@ do
   define(rebase, "list", {
     returns = "list of entries",
     doc = entryDoc("Every rebased module, by name."),
-  }, function()
+)MLUA"),
+            std::string_view(R"MLUA(  }, function()
     return native.rebaseList()
   end)
 
   define(rebase, "shown", {
     params = { { name = "address", type = "address" } },
-)MLUA"),
-            std::string_view(R"MLUA(    returns = "integer, or nil, error",
+    returns = "integer, or nil, error",
     doc = "The address as it is shown: rebased when it lies in a rebased module, else the address itself.",
   }, function(address)
     return result(native.rebaseShown(address))

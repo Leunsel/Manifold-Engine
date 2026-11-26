@@ -594,7 +594,8 @@ namespace Manifold::Lua
             const bool inherited = lua_toboolean(state, 2) != 0;
             return TypeQuery(state, [&](const UnrealRuntime& runtime, std::uint64_t type)
                 {
-                    const auto functions = runtime.HasStructLayout(type) ? runtime.Functions(type, inherited) : std::vector<Target::UnrealFunction>{};
+                    const Target::UnrealFunctionList list = runtime.HasStructLayout(type) ? runtime.FunctionList(type, inherited) : Target::UnrealFunctionList{};
+                    const std::vector<Target::UnrealFunction>& functions = list.Functions;
                     lua_createtable(state, static_cast<int>(functions.size()), 0);
                     for (std::size_t i = 0; i < functions.size(); ++i)
                     {
@@ -608,7 +609,8 @@ namespace Manifold::Lua
                         lua_setfield(state, -2, "parameters");
                         lua_rawseti(state, -2, static_cast<lua_Integer>(i + 1));
                     }
-                    return 1;
+                    lua_pushboolean(state, list.Complete);
+                    return 2;
                 });
         }
 

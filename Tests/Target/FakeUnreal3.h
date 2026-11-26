@@ -115,7 +115,7 @@ namespace FakeUnreal3
 
         ~Builder()
         {
-            for (void* block : { m_names, m_nameArray, m_objects, m_items, m_fields })
+            for (void* block : { m_names, m_nameArray, m_objects, m_items, m_fields, m_chain })
             {
                 if (block)
                     ::VirtualFree(block, 0, MEM_RELEASE);
@@ -388,6 +388,36 @@ namespace FakeUnreal3
             return index;
         }
 
+        // After Build: a class (not in GObjObjects) whose child chain has `nodes` fields, script structs except the last,
+        // which is a function. broken: the link after the middle node is no pointer. Returns the class; *last gets the
+        // function (#8: a chain of exactly kMaxFields nodes is complete, one more is cut).
+        std::uintptr_t LongChain(int nodes, std::uintptr_t* last, bool broken = false)
+        {
+            const Offsets& o = Native(m_early);
+            constexpr std::size_t kStride = 0x100;
+            m_chain = Allocate(static_cast<std::size_t>(nodes + 1) * kStride + 0x1000);
+            if (!m_chain || nodes < 1)
+                return 0;
+            const std::uint32_t name = Name("Filler");
+            const std::uintptr_t holder = reinterpret_cast<std::uintptr_t>(m_chain);
+            Header(holder, 0, name, 1);
+            Put<std::uintptr_t>(holder, o.Class, Fake.ClassClass);
+            std::uintptr_t next = 0;
+            for (int i = nodes - 1; i >= 0; --i)
+            {
+                const std::uintptr_t at = holder + static_cast<std::uintptr_t>(i + 1) * kStride;
+                Header(at, 0, name, static_cast<std::uint32_t>(i + 2));
+                Put<std::uintptr_t>(at, o.Class, i == nodes - 1 ? Fake.FunctionClass : Fake.ScriptStructClass);
+                Put<std::uintptr_t>(at, o.Outer, holder);
+                Put<std::uintptr_t>(at, o.Next, broken && i == nodes / 2 ? std::uintptr_t(0x10) : next);
+                if (i == nodes - 1 && last)
+                    *last = at;
+                next = at;
+            }
+            Put<std::uintptr_t>(holder, o.Children, next);
+            return holder;
+        }
+
         Image Fake{};
 
     private:
@@ -466,6 +496,7 @@ namespace FakeUnreal3
         std::uint8_t* m_objects = nullptr;
         std::uint8_t* m_items = nullptr;
         std::uint8_t* m_fields = nullptr;
+        std::uint8_t* m_chain = nullptr;
         int m_nameCount = 0;
         int m_objectCount = 0;
         std::size_t m_fieldUsed = 0;

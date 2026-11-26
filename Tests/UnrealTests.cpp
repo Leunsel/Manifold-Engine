@@ -473,6 +473,48 @@ namespace Manifold::Tests
                         "big struct: a definition the user changed is kept");
                 }
             }
+            for (const int count : { Target::UnrealRuntime::kMaxFields, Target::UnrealRuntime::kMaxFields + 1 })
+            {
+                // The reporter's boundary: a chain of exactly kMaxFields properties is complete, one more is cut and a higher
+                // limit reads the last one.
+                const std::string label = "chain of " + std::to_string(count);
+                FakeUnreal::Builder builder;
+                Target::UnrealRuntime runtime;
+                if (const auto fake = resolve(builder, { .BigClass = true, .BigFields = count }, runtime, label.c_str()))
+                {
+                    const bool over = count > Target::UnrealRuntime::kMaxFields;
+                    const Target::UnrealFieldList list = runtime.FieldList(fake->BigClass);
+                    CHECK_MSG(list.Complete == !over && list.CanContinue == over && list.Fields.size() == static_cast<std::size_t>(Target::UnrealRuntime::kMaxFields),
+                        label + ": " + std::to_string(list.Fields.size()) + " fields, complete " + std::to_string(list.Complete));
+                    const Target::UnrealFieldList more = runtime.FieldList(fake->BigClass, false, count);
+                    CHECK_MSG(more.Complete && more.Fields.size() == static_cast<std::size_t>(count) &&
+                        std::any_of(more.Fields.begin(), more.Fields.end(), [&](const Target::UnrealField& f) { return f.Name == "Value_" + std::to_string(count - 1); }),
+                        label + ": the last property with a higher limit");
+                }
+            }
+            for (const int count : { Table::kUnrealFieldLimit, Table::kUnrealFieldLimit + 1 })
+            {
+                // An embedded struct of exactly the fill's limit is no cut; one field more is, and Load More shows it.
+                const std::string label = "struct of " + std::to_string(count);
+                FakeUnreal::Builder builder;
+                Target::UnrealRuntime runtime;
+                if (const auto fake = resolve(builder, { .BigClass = true, .BigFields = count, .BigStruct = true }, runtime, label.c_str()))
+                {
+                    const bool over = count > Table::kUnrealFieldLimit;
+                    const std::string child = runtime.CppName(fake->BigStruct);
+                    const Table::UnrealFill fill = Table::FillUnrealObject(runtime, fake->BigInstance, true);
+                    const auto* rows = StructNamed(fill, child);
+                    CHECK_MSG(fill.Truncated == over && fill.CutStructs.empty() == !over && rows && rows->size() == static_cast<std::size_t>(Table::kUnrealFieldLimit),
+                        label + ": " + std::to_string(rows ? rows->size() : 0) + " struct rows, cut " + std::to_string(fill.Truncated));
+                    if (over)
+                    {
+                        const Table::UnrealFill more = Table::FillUnrealObject(runtime, fake->BigInstance, true, 2 * Table::kUnrealFieldLimit);
+                        const auto* all = StructNamed(more, child);
+                        CHECK_MSG(!more.Truncated && all && all->size() == static_cast<std::size_t>(count) && has(*all, "Value_" + std::to_string(count - 1)),
+                            label + ": Load More shows the last field");
+                    }
+                }
+            }
             for (const bool inStruct : { false, true })
             {
                 // A link that is not a pointer: the definition is incomplete, and a higher limit cannot help.
@@ -487,6 +529,48 @@ namespace Manifold::Tests
                     const Table::UnrealFill fill = Table::FillUnrealObject(runtime, fake->BigInstance, true);
                     CHECK_MSG(fill.Incomplete && !fill.Truncated, label);
                     CHECK_MSG(inStruct ? fill.CutStructs == std::vector<std::string>{ runtime.CppName(fake->BigStruct) } : fill.CutStructs.empty(), label);
+                }
+            }
+        }
+
+        // #8: Functions() walks each class's child chain under the same node limit. A chain of exactly kMaxFields nodes is
+        // complete and its last function is found; one node more is cut (CanContinue) and a higher limit finds it; a link
+        // that is no pointer breaks the chain.
+        void FunctionChains(Engine& engine)
+        {
+            constexpr int kLimit = Target::UnrealRuntime::kMaxFields;
+            for (const int nodes : { kLimit, kLimit + 1 })
+            {
+                for (const bool broken : { false, true })
+                {
+                    if (broken && nodes != kLimit)
+                        continue;
+                    const std::string label = "UE3 function chain of " + std::to_string(nodes) + (broken ? ", broken" : "");
+                    FakeUnreal3::Builder builder;
+                    CHECK_MSG(builder.Build(false), label);
+                    std::uintptr_t last = 0;
+                    const std::uintptr_t holder = builder.LongChain(nodes, &last, broken);
+                    CHECK_MSG(holder && last, label);
+                    Target::UnrealRuntime runtime;
+                    const Status status = runtime.Resolve(engine.Process(), Target::UnrealConfig{}, true, nullptr);
+                    CHECK_MSG(status.Ok(), label + ": " + status.Text);
+                    if (!status || !holder)
+                        continue;
+                    const Target::UnrealFunctionList list = runtime.FunctionList(holder, false);
+                    const bool found = std::any_of(list.Functions.begin(), list.Functions.end(), [&](const Target::UnrealFunction& f) { return f.Address == last; });
+                    if (broken)
+                    {
+                        CHECK_MSG(!list.Complete && !list.CanContinue && !found, label + ": complete " + std::to_string(list.Complete));
+                        continue;
+                    }
+                    const bool over = nodes > kLimit;
+                    CHECK_MSG(list.Complete == !over && list.CanContinue == over && found == !over,
+                        label + ": complete " + std::to_string(list.Complete) + ", last function " + (found ? "found" : "missing"));
+                    if (over)
+                    {
+                        const Target::UnrealFunctionList more = runtime.FunctionList(holder, false, nodes);
+                        CHECK_MSG(more.Complete && more.Functions.size() == 1 && more.Functions.front().Address == last, label + ": a higher limit finds the last function");
+                    }
                 }
             }
         }
@@ -1002,6 +1086,7 @@ namespace Manifold::Tests
             CHECK(builder.Build(early));
             Ue3Checks(engine, Widen3(builder.Fake), FakeUnreal3::Native(early), early ? "UE3 early" : "UE3 late");
         }
+        FunctionChains(engine);
         {
             // No Actor.Location, and an owner pointer ahead of the class/struct/inner slot.
             FakeUnreal3::Builder builder;

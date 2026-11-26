@@ -1736,10 +1736,10 @@ define(unreal, "functions", {
     { name = "type", type = "string|integer" },
     { name = "inherited", type = "boolean", optional = true },
   },
-  returns = "list of `{ name, owner, address, flags, parameters }`, or nil, error",
-  doc = "The UFunctions a class declares, and with `inherited` its parents' too. `parameters` are fields; the return value is the one with the return flag (`0x400` in `flags`).",
+  returns = "list of `{ name, owner, address, flags, parameters }`, complete; or nil, error",
+  doc = "The UFunctions a class declares, and with `inherited` its parents' too. `parameters` are fields; the return value is the one with the return flag (`0x400` in `flags`). `complete` is false when a class's child list was not read to its end (more entries than the reader takes, or a broken link): the list then misses functions.",
 }, function(type, inherited)
-  return result(native.unrealFunctions(type, inherited == true))
+  return many(native.unrealFunctions(type, inherited == true))
 end)
 
 define(unreal, "enum", {

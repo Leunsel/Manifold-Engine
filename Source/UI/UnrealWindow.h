@@ -46,9 +46,17 @@ namespace Manifold::UI
             bool HasFields = false;
             bool OwnOnly = false;
             std::vector<Target::UnrealField> Fields;
+            // How the lists were read: Complete, or cut with more to read (More) or by a broken chain; Nodes is the
+            // limit per chain they were read with, raised by Load More.
+            bool FieldsComplete = true;
+            bool FieldsMore = false;
+            int FieldNodes = Target::UnrealRuntime::kMaxFields;
             bool HasFunctions = false;
             bool Inherited = false;
             std::vector<Target::UnrealFunction> Functions;
+            bool FunctionsComplete = true;
+            bool FunctionsMore = false;
+            int FunctionNodes = Target::UnrealRuntime::kMaxFields;
         };
 
         void Header(const Target::UnrealRuntime& runtime);

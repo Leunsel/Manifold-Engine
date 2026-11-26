@@ -169,6 +169,14 @@ namespace Manifold::Target
         bool CanContinue = false;
     };
 
+    // A class's functions and how far its child chains were read, with the same meaning as UnrealFieldList.
+    struct UnrealFunctionList
+    {
+        std::vector<UnrealFunction> Functions;
+        bool Complete = true;
+        bool CanContinue = false;
+    };
+
     struct UnrealLocation
     {
         std::uint64_t Object = 0;
@@ -247,6 +255,8 @@ namespace Manifold::Target
         std::optional<UnrealField> FindField(std::uint64_t type, std::string_view name) const;
         std::optional<UnrealField> Describe(std::uint64_t property, const std::string& kind, const std::string& owner) const;
         std::vector<UnrealFunction> Functions(std::uint64_t type, bool inherited) const;
+        // maxNodes caps the nodes read per child chain (a function, property, struct or enum each counts).
+        UnrealFunctionList FunctionList(std::uint64_t type, bool inherited, int maxNodes = kMaxFields) const;
         std::vector<UnrealEnumEntry> EnumEntries(std::uint64_t enumObject) const;
         std::string CppName(std::uint64_t type) const;
         std::string TypeText(const UnrealField& field) const;

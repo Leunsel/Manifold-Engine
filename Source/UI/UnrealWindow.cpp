@@ -3,6 +3,7 @@
 #include "App/Engine.h"
 #include "Core/Text.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "Layout/Layout.h"
 #include "UI/Fonts.h"
 #include "UI/UiScale.h"
 #include "UI/Widgets.h"
@@ -18,6 +19,24 @@ namespace Manifold::UI
         constexpr std::size_t kNone = static_cast<std::size_t>(-1);
         constexpr std::size_t kInstanceLimit = 500;
         constexpr std::size_t kHitLimit = 2000;
+
+        // ∑ A list the reader cut says so above the table (#8): with Load More when a higher limit reads on, as a note
+        //   when a chain broke. Returns true when Load More was clicked.
+        bool CutNote(const char* id, bool complete, bool more, const char* what)
+        {
+            if (complete)
+                return false;
+            if (!more)
+            {
+                Muted(std::string("The ") + what + " list is incomplete: a chain could not be read to its end");
+                return false;
+            }
+            bool load = false;
+            Layout::Row line(id, { Layout::Size::Fit(), Layout::Size::Fill() });
+            line.Cell([&]() { load = Layout::Button("Load More"); });
+            line.Cell([&]() { Layout::Muted(std::string("The type has more ") + what + " entries than were read"); });
+            return load;
+        }
 
         const char* KindBadge(Target::UnrealKind kind)
         {
@@ -557,9 +576,17 @@ namespace Manifold::UI
     {
         if (m_view.Runtime != &runtime || m_view.Type != type || !m_view.HasFields || m_view.OwnOnly != m_ownOnly)
         {
-            m_view.Fields = runtime.Fields(type, m_ownOnly);
+            const Target::UnrealFieldList list = runtime.FieldList(type, m_ownOnly, m_view.FieldNodes);
+            m_view.Fields = list.Fields;
+            m_view.FieldsComplete = list.Complete;
+            m_view.FieldsMore = list.CanContinue;
             m_view.OwnOnly = m_ownOnly;
             m_view.HasFields = true;
+        }
+        if (CutNote("##unrealFieldsCut", m_view.FieldsComplete, m_view.FieldsMore, "property"))
+        {
+            m_view.FieldNodes += Target::UnrealRuntime::kMaxFields;
+            m_view.HasFields = false;
         }
         const std::vector<Target::UnrealField>& fields = m_view.Fields;
         if (fields.empty())
@@ -604,9 +631,17 @@ namespace Manifold::UI
     {
         if (m_view.Runtime != &runtime || m_view.Type != type || !m_view.HasFunctions || m_view.Inherited != m_inherited)
         {
-            m_view.Functions = runtime.Functions(type, m_inherited);
+            Target::UnrealFunctionList list = runtime.FunctionList(type, m_inherited, m_view.FunctionNodes);
+            m_view.Functions = std::move(list.Functions);
+            m_view.FunctionsComplete = list.Complete;
+            m_view.FunctionsMore = list.CanContinue;
             m_view.Inherited = m_inherited;
             m_view.HasFunctions = true;
+        }
+        if (CutNote("##unrealFunctionsCut", m_view.FunctionsComplete, m_view.FunctionsMore, "function"))
+        {
+            m_view.FunctionNodes += Target::UnrealRuntime::kMaxFields;
+            m_view.HasFunctions = false;
         }
         const std::vector<Target::UnrealFunction>& functions = m_view.Functions;
         if (functions.empty())

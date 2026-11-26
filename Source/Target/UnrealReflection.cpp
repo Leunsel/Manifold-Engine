@@ -725,18 +725,31 @@ namespace Manifold::Target
         return entries;
     }
 
-    std::vector<UnrealFunction> UnrealRuntime::Functions(std::uint64_t type, bool inherited) const
+    UnrealFunctionList UnrealRuntime::FunctionList(std::uint64_t type, bool inherited, int maxNodes) const
     {
-        std::vector<UnrealFunction> out;
+        // ∑ Like OwnFields: the walk says where a child chain stopped. It used to end at kMaxFields nodes as if the chain
+        //   had ended there, so later functions were missing without a word (#8). A null link is the end; a link that is
+        //   no pointer, or one that cannot be read, breaks the chain; the node limit cuts it, and a higher limit reads on.
+        UnrealFunctionList list;
         if (m_layout.Children < 0)
-            return out;
+            return list;
+        const auto end = [&](const std::optional<std::uint64_t>& link, bool stoppedAtLimit)
+            {
+                if (link && *link == 0)
+                    return;
+                list.Complete = false;
+                list.CanContinue = list.CanContinue || (stoppedAtLimit && link && IsPtr(*link));
+            };
         std::uint64_t current = type;
         for (int depth = 0; depth < kMaxSuperDepth && IsPtr(current); ++depth)
         {
             const std::string owner = NameOf(current).value_or("?");
-            std::uint64_t field = ReadObject(current + static_cast<std::uint64_t>(m_layout.Children));
-            for (int guard = 0; field && guard < kMaxFields; ++guard)
+            std::optional<std::uint64_t> link = ReadPointer(current + static_cast<std::uint64_t>(m_layout.Children));
+            int nodes = 0;
+            while (link && IsPtr(*link) && nodes < maxNodes)
             {
+                const std::uint64_t field = *link;
+                ++nodes;
                 if (IsFunction(field))
                 {
                     UnrealFunction function;
@@ -745,15 +758,21 @@ namespace Manifold::Target
                     function.Address = field;
                     function.Flags = m_layout.FunctionFlags >= 0 ? ReadUInt(field + static_cast<std::uint64_t>(m_layout.FunctionFlags)).value_or(0) : 0;
                     function.Parameters = OwnFields(field).Fields;
-                    out.push_back(std::move(function));
+                    list.Functions.push_back(std::move(function));
                 }
-                field = ReadObject(field + static_cast<std::uint64_t>(m_layout.ChildNext));
+                link = ReadPointer(field + static_cast<std::uint64_t>(m_layout.ChildNext));
             }
+            end(link, nodes >= maxNodes);
             if (!inherited)
                 break;
             current = SuperOf(current);
         }
-        return out;
+        return list;
+    }
+
+    std::vector<UnrealFunction> UnrealRuntime::Functions(std::uint64_t type, bool inherited) const
+    {
+        return FunctionList(type, inherited).Functions;
     }
 
     std::string UnrealRuntime::FullName(std::uint64_t object) const
