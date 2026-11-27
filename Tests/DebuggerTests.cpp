@@ -970,6 +970,126 @@ namespace Manifold::Tests
         EndTestTarget(target, code);
     }
 
+    void CheckSlotKindChange(const std::filesystem::path& targetPath)
+    {
+        PROCESS_INFORMATION target{};
+        if (!StartTestTarget(target, targetPath, L" --write-probe"))
+        {
+            CHECK_MSG(false, "could not start the test target for the slot kind change check");
+            return;
+        }
+        {
+            Settings settings;
+            settings.UseInProcessDebugger = true;
+            Engine engine(settings);
+            const Status opened = engine.OpenProcess(MakeProcessId(target.dwProcessId));
+            CHECK_MSG(opened.Ok(), opened.Text);
+            const std::uint64_t probe = opened ? engine.Evaluate("TestTarget.g_writeProbe").value_or(0) : 0;
+            const std::uint64_t ask = opened ? engine.Evaluate("TestTarget.g_writeAsk").value_or(0) : 0;
+            const std::uint64_t done = opened ? engine.Evaluate("TestTarget.g_writeDone").value_or(0) : 0;
+            const std::uint64_t threadAt = opened ? engine.Evaluate("TestTarget.g_writeThread").value_or(0) : 0;
+            const bool found = probe && ask && done && threadAt;
+            CHECK_MSG(found, "slot kind change: no write probe in the target");
+            const Status attached = found ? engine.EnsureDebugger() : Status::Fail(ErrorCode::DebugNotAttached);
+            CHECK_MSG(attached.Ok(), attached.Text);
+            DWORD threadId = 0;
+            if (attached)
+                engine.Process()->ReadExact(threadAt, &threadId, sizeof(threadId));
+            HANDLE thread = threadId ? ::OpenThread(THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME, FALSE, threadId) : nullptr;
+            CHECK_MSG(!attached || thread, "slot kind change: could not open the probe thread");
+            Debug::Debugger& debugger = engine.Debugger();
+            long serial = 0;
+            const auto write = [&]()
+                {
+                    ++serial;
+                    engine.Process()->Write(ask, &serial, sizeof(serial));
+                    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(2000);
+                    while (std::chrono::steady_clock::now() < until)
+                    {
+                        long seen = 0;
+                        engine.Process()->ReadExact(done, &seen, sizeof(seen));
+                        if (seen == serial)
+                            return true;
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    }
+                    return false;
+                };
+            const auto held = [&]() -> std::uint64_t
+                {
+                    alignas(16) CONTEXT context{};
+                    context.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+                    bool read = false;
+                    if (::SuspendThread(thread) != static_cast<DWORD>(-1))
+                    {
+                        read = ::GetThreadContext(thread, &context) != FALSE;
+                        ::ResumeThread(thread);
+                    }
+                    const DWORD64 slots[4] = { context.Dr0, context.Dr1, context.Dr2, context.Dr3 };
+                    for (int slot = 0; read && slot < 4; ++slot)
+                    {
+                        if (slots[slot] == probe && (context.Dr7 & (1ull << (slot * 2))) != 0)
+                            return (context.Dr7 >> (16 + slot * 4)) & 0xF;
+                    }
+                    return 0xFF;
+                };
+            const auto count = [&](int id)
+                {
+                    Debug::Watch copy;
+                    std::uint64_t total = 0;
+                    if (debugger.CopyWatch(id, copy))
+                    {
+                        for (const Debug::WatchEntry& entry : copy.Entries)
+                            total += entry.Count;
+                    }
+                    return total;
+                };
+            struct Change
+            {
+                Debug::WatchKind Kind;
+                int Size;
+                const char* Name;
+            };
+            const Change changes[] = { { Debug::WatchKind::Accesses, 4, "writes to accesses" }, { Debug::WatchKind::Writes, 8, "size 4 to size 8" } };
+            for (const Change& change : changes)
+            {
+                bool stale = false;
+                for (int attempt = 0; thread && attempt < 5 && !stale; ++attempt)
+                {
+                    int before = 0;
+                    CHECK(debugger.StartWatch(Debug::WatchKind::Writes, probe, 4, before).Ok());
+                    Wait(engine, 300);
+                    const bool first = write();
+                    debugger.StopWatch(before);
+                    int after = 0;
+                    CHECK(debugger.StartWatch(change.Kind, probe, change.Size, after).Ok());
+                    const std::uint64_t nibble = held();
+                    const bool second = write();
+                    Wait(engine, 300);
+                    const std::uint64_t now = count(after);
+                    debugger.RemoveWatch(after);
+                    debugger.RemoveWatch(before);
+                    CHECK_MSG(first && second, std::string("slot kind change, ") + change.Name + ": the probe thread did not write");
+                    stale = nibble == 0xD;
+                    if (stale)
+                        CHECK_MSG(now == 1, std::string("slot kind change, ") + change.Name + ": the new watch counted " + std::to_string(now) +
+                            " hits for the one write of a thread that still held the old registers");
+                }
+                CHECK_MSG(!thread || stale, std::string("slot kind change, ") + change.Name + ": the probe thread never still held the old registers when the watch changed");
+            }
+            if (thread)
+                ::CloseHandle(thread);
+            if (attached)
+            {
+                debugger.Detach();
+                Wait(engine, 400);
+            }
+        }
+        DWORD code = 0;
+        ::GetExitCodeProcess(target.hProcess, &code);
+        CHECK_MSG(code == STILL_ACTIVE, "slot kind change: the target ended with " + Hex(code, 8));
+        EndTestTarget(target, code);
+    }
+
     void CheckTraceUnderLoad(const std::filesystem::path& targetPath)
     {
         ::SetEnvironmentVariableW(L"MANIFOLD_STRESS_THREADS", L"64");
@@ -1262,6 +1382,7 @@ namespace Manifold::Tests
         CHECK_MSG(code == STILL_ACTIVE, "the target of the in-process debugger ended with " + Hex(code, 8));
         CheckHostExits(targetPath);
         CheckForeignSingleStep(targetPath);
+        CheckSlotKindChange(targetPath);
         CheckTraceUnderLoad(targetPath);
         return Totals().Failures - before;
     }

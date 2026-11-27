@@ -1365,6 +1365,29 @@ namespace
     }
 }
 
+extern "C" __declspec(dllexport) __declspec(align(8)) volatile long g_writeProbe[2] = {};
+extern "C" __declspec(dllexport) volatile long g_writeAsk = 0;
+extern "C" __declspec(dllexport) volatile long g_writeDone = 0;
+extern "C" __declspec(dllexport) volatile DWORD g_writeThread = 0;
+
+namespace
+{
+    DWORD WINAPI WriteProbeWorker(void*)
+    {
+        g_writeThread = ::GetCurrentThreadId();
+        for (;;)
+        {
+            const long ask = g_writeAsk;
+            if (ask != g_writeDone)
+            {
+                g_writeProbe[0] = ask;
+                g_writeDone = ask;
+            }
+            ::Sleep(1);
+        }
+    }
+}
+
 extern "C" __declspec(dllexport) FakeRtti::Image g_rttiFake = {};
 extern "C" __declspec(dllexport) UnrealMarker g_unrealNames = { { 'M', 'F', 'U', 'E', 'P', 'O', 'O', 'L' }, &FakeUnreal::g_pool };
 extern "C" __declspec(dllexport) UnrealMarker g_unrealObjects = { { 'M', 'F', 'U', 'E', 'O', 'B', 'J', 'S' }, &FakeUnreal::g_objects };
@@ -1435,6 +1458,8 @@ int main(int argc, char** argv)
             StartCoverProbe();
         else if (std::strcmp(argv[i], "--trap-flag") == 0)
             StartTrapFlagProbe();
+        else if (std::strcmp(argv[i], "--write-probe") == 0)
+            ::CloseHandle(::CreateThread(nullptr, 0, &WriteProbeWorker, nullptr, 0, nullptr));
         else if (std::strcmp(argv[i], "--crash") == 0)
             ::SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);  // a crash ends the process at once, without the Windows dialog
         else if (std::strcmp(argv[i], "--mono-agent") == 0)
