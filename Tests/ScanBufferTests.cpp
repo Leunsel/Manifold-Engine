@@ -280,6 +280,42 @@ namespace Manifold::Tests
             }
         }
 
+        // A range that starts between alignment steps: Unknown initial value, then Exact, finds what a direct Exact finds.
+        void UnalignedSnapshotStart(const std::shared_ptr<Target::Process>& process)
+        {
+            Pages pages;
+            CHECK(pages.Data != nullptr);
+            if (!pages.Data)
+                return;
+            std::memset(pages.Data, 0x57, 16);
+            const std::int32_t value = 123456;
+            std::memcpy(pages.Data + 4, &value, sizeof(value));
+            ScanOptions options;
+            options.Type = ValueType::FourBytes;
+            options.Value = "123456";
+            options.Start = pages.At(1);
+            options.Stop = pages.At(16);
+            options.Alignment = 4;
+            Scanner direct;
+            ScanRecord record;
+            const bool exact = direct.Start(process, options, true) && Wait(direct);
+            CHECK_MSG(exact && direct.Count() == 1 && direct.Record(0, record) && record.Address == pages.At(4),
+                Format("direct exact from base + 1: %llu results", static_cast<unsigned long long>(direct.Count())));
+
+            Scanner refined;
+            options.Mode = Compare::Unknown;
+            options.Value.clear();
+            const bool unknown = refined.Start(process, options, true) && Wait(refined);
+            const bool firstAligned = refined.Count() > 0 && refined.Record(0, record) && record.Address == pages.At(4);
+            CHECK_MSG(unknown && refined.Count() == 3 && firstAligned,
+                Format("unknown initial value from base + 1: %llu candidates, the first at base + %lld", static_cast<unsigned long long>(refined.Count()),
+                       refined.Count() > 0 ? static_cast<long long>(record.Address - pages.At(0)) : -1ll));
+            options.Value = "123456";
+            const std::uint64_t found = NextCount(process, refined, options, Compare::Exact);
+            CHECK_MSG(found == 1 && refined.Record(0, record) && record.Address == pages.At(4),
+                Format("exact after unknown initial value from base + 1: %llu results", static_cast<unsigned long long>(found)));
+        }
+
         int RunScanBufferTests()
         {
             const int before = Totals().Failures;
@@ -292,6 +328,7 @@ namespace Manifold::Tests
             ValueReads(process);
             UnreadablePages(process);
             ByteArrayNextScanWidth(process);
+            UnalignedSnapshotStart(process);
             return Totals().Failures - before;
         }
     }

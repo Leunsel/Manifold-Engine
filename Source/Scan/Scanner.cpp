@@ -1491,18 +1491,20 @@ namespace Manifold::Scan
                             m_done += chunk.Size;
                             continue;
                         }
+                        const std::size_t firstOffset = static_cast<std::size_t>((alignment - (chunk.Base % static_cast<std::uint64_t>(alignment))) % static_cast<std::uint64_t>(alignment));
                         if (snapshotMode)
                         {
+                            const std::size_t skip = std::min(firstOffset, readSize);
                             Snapshot snapshot;
                             snapshot.Order = item;
-                            snapshot.Base = chunk.Base;
-                            snapshot.Size = readSize;
+                            snapshot.Base = chunk.Base + skip;
+                            snapshot.Size = readSize - skip;
                             snapshot.File = index;
                             snapshot.Offset = file.Size();
-                            const std::uint64_t usable = readSize >= static_cast<std::size_t>(valueSize) ? readSize - static_cast<std::size_t>(valueSize) : 0;
-                            const std::uint64_t positions = readSize >= static_cast<std::size_t>(valueSize) ? std::min<std::uint64_t>(chunk.Size, usable + 1) : 0;
+                            const std::uint64_t usable = snapshot.Size >= static_cast<std::uint64_t>(valueSize) ? snapshot.Size - static_cast<std::uint64_t>(valueSize) : 0;
+                            const std::uint64_t positions = snapshot.Size >= static_cast<std::uint64_t>(valueSize) ? std::min<std::uint64_t>(chunk.Size - std::min<std::uint64_t>(chunk.Size, skip), usable + 1) : 0;
                             snapshot.Positions = positions == 0 ? 0 : (positions - 1) / static_cast<std::uint64_t>(alignment) + 1;
-                            if (!file.Append(buffer.data(), readSize))
+                            if (!file.Append(buffer.data() + skip, static_cast<std::size_t>(snapshot.Size)))
                                 storeFailed = true;
                             localSnapshots.push_back(snapshot);
                             m_done += chunk.Size;
@@ -1513,7 +1515,6 @@ namespace Manifold::Scan
                         segment.File = index;
                         segment.Offset = file.Size();
                         const auto write = writer(file, record, segment);
-                        const std::size_t firstOffset = static_cast<std::size_t>((alignment - (chunk.Base % static_cast<std::uint64_t>(alignment))) % static_cast<std::uint64_t>(alignment));
                         const std::size_t limit = readSize >= static_cast<std::size_t>(valueSize)
                                                       ? static_cast<std::size_t>(std::min<std::uint64_t>(chunk.Size, readSize - static_cast<std::size_t>(valueSize) + 1))
                                                       : 0;
