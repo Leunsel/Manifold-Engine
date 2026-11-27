@@ -242,6 +242,10 @@ namespace Manifold::Tests
             CHECK_MSG(before && before->Description.find("b 5") != std::string::npos, "the dropped table did not load");
             frames.Key(workspace, ImGuiKey_Enter);
             frames.Frames(workspace, 2);
+            bool stillAsking = false;
+            for (const ImGuiWindow* window : ImGui::GetCurrentContext()->Windows)
+                stillAsking = stillAsking || (window->Active && std::string(window->Name).find("Delete Records") != std::string::npos);
+            CHECK_MSG(!stillAsking, "Enter did not answer Delete Records");
             std::string left;
             for (const int id : { 1, 2, 5 })
                 left += engine.Table().FindById(id) ? std::to_string(id) + " " : "";
@@ -291,6 +295,10 @@ namespace Manifold::Tests
             CHECK(engine.LoadTable(b, false).Ok());
             frames.Frames(workspace, 2);
             frames.Press(workspace, window, ImGuiKey_S, ImGuiMod_Ctrl);
+            bool refused = false;
+            for (const ImGuiWindow* shown : ImGui::GetCurrentContext()->Windows)
+                refused = refused || (shown->Active && std::string(shown->Name).find("###scripterror") != std::string::npos);
+            CHECK_MSG(refused, "Ctrl+S in the editor of table a did not say that it did not save");
             const Table::MemoryRecord* other = engine.Table().FindById(3);
             CHECK_MSG(other && other->Script.find("table b") != std::string::npos,
                 "table b's record 3 after Save in the editor opened for table a: " + (other ? ReplaceAll(other->Script, "\n", " | ") : std::string("missing")));
