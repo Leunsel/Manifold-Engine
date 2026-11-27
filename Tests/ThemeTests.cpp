@@ -146,6 +146,17 @@ namespace Manifold::Tests
             library.Shown(library.Effective(settings));
             CHECK(library.TakeChanged());
             CHECK(!library.ClearScript("=other") && library.ClearScript("=probe") && !library.Scripted());
+
+            Themes::CustomTheme wide;
+            wide.Name = "a";
+            for (int i = 0; i < 40; ++i)
+                wide.Name += "\xC3\x84";
+            CHECK(library.Save(wide).Ok());
+            CHECK_MSG(WideToUtf8(Utf8ToWide(wide.Id)) == wide.Id, "the file name is not the id: " + std::to_string(wide.Id.size()) + " bytes");
+            ThemeSettings chosen;
+            chosen.Custom = wide.Id;
+            const Status activated = library.Activate(chosen);
+            CHECK_MSG(activated.Ok(), activated.Text);
         }
 
         void Migration(const std::filesystem::path& root)
