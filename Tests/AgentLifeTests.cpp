@@ -253,8 +253,6 @@ namespace Manifold::Tests
             CHECK_MSG(target.Alive(), what + ": the game ended when the agent unloaded");
         }
 
-        // An agent from another folder is in the game already, from a Manifold that runs from there:
-        // the load must be counted by the copy the game holds it in, or that copy frees itself once too often.
         void CheckOtherCopy(const std::filesystem::path& path, const char* label)
         {
             const std::string what = std::string(label) + " agent from another folder";
@@ -280,7 +278,6 @@ namespace Manifold::Tests
             std::filesystem::create_directories(folder, error);
             const bool copied = std::filesystem::copy_file(Target::AgentFilePath(process.Is64Bit()), copy, std::filesystem::copy_options::overwrite_existing, error);
             CHECK_MSG(copied, what + ": the agent could not be copied to " + copy.string());
-            // the other Manifold loads its copy through its own handle, so this one's module list does not show it yet
             Result<std::shared_ptr<Target::Process>> other = Target::Process::Open(MakeProcessId(target.Info.dwProcessId));
             const Status injected = copied && other ? (*other)->InjectLibrary(copy.wstring()) : Status::Fail(ErrorCode::InjectFailed);
             CHECK_MSG(injected.Ok(), what + ": " + injected.Text);

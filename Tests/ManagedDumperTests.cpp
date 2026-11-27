@@ -599,8 +599,6 @@ namespace Manifold::Tests
             engine.CloseProcess();
         }
 
-        // The runtime takes longer than the call's time limit to open the image: the call is
-        // still queued in the game, so the image's bytes must still be there when it runs.
         void CheckOpenStall(const std::filesystem::path& targetPath)
         {
             AgentTarget target;

@@ -308,8 +308,6 @@ namespace Manifold::Tests
         engine.Tick();
     }
 
-    // A class first asked about while the worker cannot answer (every thread of the game
-    // held, as by a debugger break): once the worker runs again, the class has its members.
     void CheckFrozenWorker(Engine& engine, const std::string& className, std::size_t methods, std::size_t fields)
     {
         Target::MonoBridge& bridge = engine.Mono();
