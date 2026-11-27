@@ -302,6 +302,10 @@ namespace Manifold::Tests
                 { "struct S { char p[0xFFFFFFC]; int a : 3; int b : 3; char c : 1; };", 0xFFFFFFC, "b", "c lies beyond" },
                 { "struct S { char a[0x20000000]; int b : 3; };", 0, "a", "b lies beyond" },
                 { "struct S { char p[0xFFFFFF0]; struct { int x[8]; int y; }; };", 0xFFFFFFC, "x[3]", "x[4] lies beyond" },
+                { "[StructLayout(LayoutKind.Explicit)] public struct S { [FieldOffset(0x8)] public int k; [FieldOffset(0xFFFFFFFF)] public int a; };", 8, "k", "a lies beyond" },
+                { "[StructLayout(LayoutKind.Explicit)] public struct S { [FieldOffset(0x8)] public int k; [FieldOffset(0x100000004)] public int a; };", 8, "k", "a lies beyond" },
+                { "[StructLayout(LayoutKind.Explicit)] public struct S { [FieldOffset(0x8)] public int k; [FieldOffset(0x80000000)] public int a; public int b; };", 8, "k", "a lies beyond" },
+                { "[StructLayout(LayoutKind.Sequential, Size = 0x20000000)] public struct S { public int k; };", 0, "k", "" },
             };
             for (const Case& test : kCases)
             {
@@ -310,7 +314,7 @@ namespace Manifold::Tests
                 bool inside = s != nullptr;
                 for (const StructField& field : s ? s->Fields : std::vector<StructField>())
                     inside = inside && field.Offset >= 0 && field.Offset < kMaxFieldOffset;
-                bool warned = false;
+                bool warned = test.Beyond.empty();
                 for (const std::string& warning : imported.Warnings)
                     warned = warned || warning.find(test.Beyond) != std::string::npos;
                 CHECK_MSG(inside && warned && At(s, test.LastOffset, test.Last), std::string(test.Text) + " -> " + Offsets(s));

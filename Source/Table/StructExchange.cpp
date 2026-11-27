@@ -810,7 +810,7 @@ namespace Manifold::Table
                         numbers.push_back(m_tokens[i].Value);
                 }
                 if (text.find("FieldOffset") != std::string::npos && !numbers.empty())
-                    m_fieldOffset = static_cast<int>(numbers.front());
+                    m_fieldOffset = static_cast<int>(std::min<std::uint64_t>(numbers.front(), kMaxFieldOffset));
                 if (text.find("StructLayout") != std::string::npos)
                 {
                     m_explicit = text.find("Explicit") != std::string::npos;
@@ -819,7 +819,7 @@ namespace Manifold::Table
                     for (std::size_t i = start; i + 2 < m_at; ++i)
                     {
                         if (m_tokens[i].Text == "Size" && m_tokens[i + 1].Text == "=" && m_tokens[i + 2].Kind == TokenKind::Number)
-                            m_layoutSize = static_cast<int>(m_tokens[i + 2].Value);
+                            m_layoutSize = static_cast<int>(std::min<std::uint64_t>(m_tokens[i + 2].Value, kMaxFieldOffset));
                         if (m_tokens[i].Text == "Pack" && m_tokens[i + 1].Text == "=" && m_tokens[i + 2].Kind == TokenKind::Number)
                             m_layoutPack = static_cast<int>(m_tokens[i + 2].Value);
                     }
