@@ -1439,12 +1439,24 @@ namespace Manifold::Table
                     {
                         const int base = at + i * type.Size;
                         const std::string element = count > 0 ? Format("%s[%d]", name.c_str(), i) : name;
+                        if (base >= kMaxFieldOffset)
+                        {
+                            Warn(line, Format("%s lies beyond the largest offset a dissect field can have (%X); it is left out", element.c_str(), kMaxFieldOffset));
+                            break;
+                        }
                         if (type.Kind == Basic::MemberFunction)
                             plain(TypeInfo{ Basic::Pointer, m_pointer, m_pointer, false, {} }, base, element);
                         else
                             plain(TypeInfo{ Basic::Integer, 4, 4, true, {} }, base, element);
                         for (std::size_t part = 0; part < parts.size(); ++part)
+                        {
+                            if (base + head + 4 * static_cast<int>(part) >= kMaxFieldOffset)
+                            {
+                                Warn(line, Format("%s_%s lies beyond the largest offset a dissect field can have (%X); it is left out", element.c_str(), parts[part].c_str(), kMaxFieldOffset));
+                                break;
+                            }
                             plain(TypeInfo{ Basic::Integer, 4, 4, true, {} }, base + head + 4 * static_cast<int>(part), element + "_" + parts[part]);
+                        }
                     }
                     if (type.Model == InheritanceModel::Unknown)
                         Warn(line, Format("%s: %s is not defined before it, so the pointer to member takes MSVC's general form (%d bytes); "
@@ -1482,7 +1494,14 @@ namespace Manifold::Table
                 if (count <= kExpand && !(type.Kind == Basic::Integer && type.Size == 1))
                 {
                     for (int i = 0; i < count; ++i)
+                    {
+                        if (at + static_cast<std::int64_t>(i) * type.Size >= kMaxFieldOffset)
+                        {
+                            Warn(line, Format("%s[%d] lies beyond the largest offset a dissect field can have (%X); it is left out", name.c_str(), i, kMaxFieldOffset));
+                            return;
+                        }
                         plain(type, at + i * type.Size, Format("%s[%d]", name.c_str(), i));
+                    }
                     return;
                 }
                 StructField field;

@@ -285,6 +285,35 @@ namespace Manifold::Tests
             }
         }
 
+        void CheckFieldsPastOffsetLimit()
+        {
+            struct Case
+            {
+                std::string_view Text;
+                int LastOffset;
+                std::string_view Last;
+                std::string_view Beyond;
+            };
+            static constexpr Case kCases[] = {
+                { "struct S { char p[0xFFFFFF0]; int a[64]; };", 0xFFFFFFC, "a[3]", "a[4] lies beyond" },
+                { "struct Inner { char x[0x8000000]; }; struct S { Inner a[20]; int b; };", 0x8000000, "a[1]", "a[2] lies beyond" },
+                { "struct C { int x; }; struct S { char p[0xFFFFFF0]; void (C::*a[8])(); };", 0xFFFFFF8, "a[1]", "a[2] lies beyond" },
+                { "struct Fwd; struct S { char p[0xFFFFFF8]; void (Fwd::*m)(); };", 0xFFFFFF8, "m", "m_thisAdjust lies beyond" },
+            };
+            for (const Case& test : kCases)
+            {
+                const StructImport imported = Import(test.Text);
+                const StructDefinition* s = Named(imported.Structures, "S");
+                bool inside = s != nullptr;
+                for (const StructField& field : s ? s->Fields : std::vector<StructField>())
+                    inside = inside && field.Offset >= 0 && field.Offset < kMaxFieldOffset;
+                bool warned = false;
+                for (const std::string& warning : imported.Warnings)
+                    warned = warned || warning.find(test.Beyond) != std::string::npos;
+                CHECK_MSG(inside && warned && At(s, test.LastOffset, test.Last), std::string(test.Text) + " -> " + Offsets(s));
+            }
+        }
+
         // #11: function pointers and pointers to members. The expected numbers are
         // offsetof/sizeof from cl 19.4x (VS 2022) on the same text, x64 then x86.
         void CheckFunctionPointers()
@@ -508,6 +537,7 @@ namespace Manifold::Tests
             CheckMsvcLayout();
             CheckFunctionPointers();
             CheckHugeArrays();
+            CheckFieldsPastOffsetLimit();
             CheckCSharp();
             CheckReClass();
             CheckMerge();
