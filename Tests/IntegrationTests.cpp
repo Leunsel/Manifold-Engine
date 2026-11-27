@@ -50,6 +50,8 @@ namespace Manifold::Tests
             if not autoAssemble(string.format('%X:\nmov eax,2A\n%s', answerStub, wide and 'ret' or 'ret 4')) then return 'the answer stub did not assemble' end
             local answered = executeCode(answerStub, 0)
             if answered ~= 42 then return 'executeCode gave ' .. tostring(answered) end
+            local unwaited = executeCode(answerStub, 0, 0)
+            if unwaited ~= nil then return 'executeCode without a wait gave ' .. tostring(unwaited) end
             local slowStub = allocateMemory(0x100)
             local slow = wide and 'sub rsp,28\nmov ecx,#1000\nmov rax,kernel32.Sleep\ncall rax\nadd rsp,28\nret' or 'push #1000\nmov eax,kernel32.Sleep\ncall eax\nret 4'
             if not autoAssemble(string.format('%X:\n%s', slowStub, slow)) then return 'the slow stub did not assemble' end

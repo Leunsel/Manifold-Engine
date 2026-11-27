@@ -549,6 +549,8 @@ namespace Manifold::Lua
                 lua_pushstring(state, result.Error().Text.c_str());
                 return 2;
             }
+            if (!request.Wait)
+                return 0;
             lua_pushinteger(state, static_cast<lua_Integer>(*result));
             return 1;
         }
