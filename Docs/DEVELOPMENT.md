@@ -93,6 +93,7 @@ Some checks need a real game, a long run or a special situation and are not part
 | `--function-search-check` | with `--gaps` it looks at the code between the unwind entries of every loaded System32 DLL, and `--dump` prints the cases it got wrong or could not find |
 | `--pointer-scan-bench --process=<name or id>` | builds the pointer map of a running process, searches three times, rescans, and prints the times, the pointer and path counts and the memory used; `--address=`, `--level=`, `--offset=`, `--results=`, `--threads=`, `--readonly`, `--mapped`, `--system` and `--any-offset` set the scan |
 | `--compat` | runs a cheat table without a window |
+| `--table-roundtrip <table or folder>` | loads each table, writes it the way Save would, and lists the elements, attributes and values the written text has fewer of, and table files whose bytes differ after loading it again; the tables are only read, and `--out=<folder>` puts the written copies into that folder |
 
 With the environment variable `MANIFOLD_TEMPLATE_CHECK` set to a folder of templates, the `templates` suite also generates each of them for an instruction of the tests program itself, prints whether the result assembles and writes it into `_rendered` there. This prints only and fails nothing.
 

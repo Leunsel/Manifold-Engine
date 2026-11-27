@@ -315,6 +315,7 @@ python "$(ProjectDir)..\Tools\gen_buildinfo.py" "$(IntDir)Info\ManifoldBuild.h"<
     <ClCompile Include="..\Tests\StructureTests.cpp" />
     <ClCompile Include="..\Tests\TableCleanupTests.cpp" />
     <ClCompile Include="..\Tests\TableFileTests.cpp" />
+    <ClCompile Include="..\Tests\TableRoundTrip.cpp" />
     <ClCompile Include="..\Tests\TemplateTests.cpp" />
     <ClCompile Include="..\Tests\TextTests.cpp" />
     <ClCompile Include="..\Tests\ThemeTests.cpp" />

@@ -672,6 +672,9 @@
     <ClCompile Include="..\Tests\TableFileTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
+    <ClCompile Include="..\Tests\TableRoundTrip.cpp">
+      <Filter>Tests</Filter>
+    </ClCompile>
     <ClCompile Include="..\Tests\TemplateTests.cpp">
       <Filter>Tests</Filter>
     </ClCompile>
