@@ -459,6 +459,35 @@ namespace Manifold::Tests
             CHECK_MSG(Resave(again) == saved, "a second save changes the table");
         }
 
+        void TableDisassemblerComments()
+        {
+            const std::string input = "<CheatTable><CheatEntries/><DisassemblerComments>"
+                "<DisassemblerComment><Address>\"game.exe\"+20</Address><Comment>my note\n</Comment><Header>Combat</Header></DisassemblerComment>"
+                "<DisassemblerComment><Address>\"game.exe\"+30</Address><Header>Only header</Header></DisassemblerComment>"
+                "</DisassemblerComments></CheatTable>";
+            Table::LoadedTable loaded;
+            CHECK(Table::ParseTable(input, loaded).Ok());
+            CHECK_EQ(loaded.DisasmNotes.size(), 2u);
+            CHECK(loaded.DisasmNotes.count("\"game.exe\"+20") && loaded.DisasmNotes["\"game.exe\"+20"].Comment == "my note\n" &&
+                  loaded.DisasmNotes["\"game.exe\"+20"].Header == "Combat");
+            CHECK(loaded.DisasmNotes.count("\"game.exe\"+30") && loaded.DisasmNotes["\"game.exe\"+30"].Comment.empty() &&
+                  loaded.DisasmNotes["\"game.exe\"+30"].Header == "Only header");
+            const std::string saved = Resave(loaded);
+            Xml::ParseResult parsed = Xml::Parse(saved);
+            const Xml::Node* section = parsed.Root ? parsed.Root->Child("DisassemblerComments") : nullptr;
+            const std::vector<const Xml::Node*> entries = section ? section->ChildrenNamed("DisassemblerComment") : std::vector<const Xml::Node*>();
+            CHECK_MSG(entries.size() == 2, "disassembler comments not saved as Cheat Engine reads them: " + saved);
+            if (entries.size() == 2)
+            {
+                CHECK(entries[0]->ChildText("Address") == "\"game.exe\"+20" && entries[0]->ChildText("Comment") == "my note\n" && entries[0]->ChildText("Header") == "Combat");
+                CHECK(entries[1]->ChildText("Address") == "\"game.exe\"+30" && !entries[1]->HasChild("Comment") && entries[1]->ChildText("Header") == "Only header");
+            }
+
+            Table::LoadedTable older;
+            CHECK(Table::ParseTable("<CheatTable><DisassemblerComments><Comment Address=\"game.exe+1234\" Header=\"Old\">old note</Comment></DisassemblerComments></CheatTable>", older).Ok());
+            CHECK(older.DisasmNotes.count("game.exe+1234") && older.DisasmNotes["game.exe+1234"].Comment == "old note" && older.DisasmNotes["game.exe+1234"].Header == "Old");
+        }
+
         void AutoAssemblerOffline()
         {
             Asm::AaHost host;
@@ -2228,6 +2257,7 @@ hostileRan = true
         XmlParsing();
         TableRoundTrip();
         TableSectionsKept();
+        TableDisassemblerComments();
         AutoAssemblerOffline();
         CodeSearchHelpers();
         ScanKinds();

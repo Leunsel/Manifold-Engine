@@ -527,6 +527,16 @@ namespace Manifold::Table
                 note.Header = entry->Attribute("Header").value_or("");
                 table.DisasmNotes[address] = std::move(note);
             }
+            for (const Xml::Node* entry : comments->ChildrenNamed("DisassemblerComment"))
+            {
+                const std::string address = Trim(entry->ChildText("Address"));
+                if (address.empty())
+                    continue;
+                AddressList::DisasmNote note;
+                note.Comment = entry->ChildText("Comment");
+                note.Header = entry->ChildText("Header");
+                table.DisasmNotes[address] = std::move(note);
+            }
         }
         if (const Xml::Node* codes = root.Child("CheatCodes"))
             table.CodeListEntries = static_cast<int>(codes->ChildrenNamed("CodeEntry").size());
@@ -623,10 +633,12 @@ namespace Manifold::Table
             {
                 if (note.Comment.empty() && note.Header.empty())
                     continue;
-                Xml::Node& entry = node.Add("Comment", note.Comment);
-                entry.SetAttribute("Address", address);
+                Xml::Node& entry = node.Add("DisassemblerComment");
+                entry.Add("Address", address);
+                if (!note.Comment.empty())
+                    entry.Add("Comment", note.Comment);
                 if (!note.Header.empty())
-                    entry.SetAttribute("Header", note.Header);
+                    entry.Add("Header", note.Header);
             }
         }
         if (!list.TableLuaScript.empty())
