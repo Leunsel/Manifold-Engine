@@ -70,7 +70,8 @@ namespace FakeUnreal3
     inline constexpr int kWorldInfo = 0x138;
     inline constexpr int kActorSize = 0x140;
     inline constexpr int kPawn = 0x140;
-    inline constexpr int kControllerSize = 0x150;
+    inline constexpr int kOnTouch = 0x148;
+    inline constexpr int kControllerSize = 0x160;
     inline constexpr int kPlayerActor = 0x100;
     inline constexpr int kGamePlayers = 0x100;
     inline constexpr std::uint32_t kHiddenMask = 0x00000004;
@@ -161,6 +162,7 @@ namespace FakeUnreal3
             const std::uintptr_t boolClass = Object("BoolProperty");
             const std::uintptr_t arrayClass = Object("ArrayProperty");
             const std::uintptr_t nameClass = Object("NameProperty");
+            const std::uintptr_t delegateClass = Object("DelegateProperty");
             Fake.Vector = Object("Vector");
             const std::uintptr_t vector2D = Object("Vector2D");
             const std::uintptr_t linearColor = Object("LinearColor");
@@ -202,7 +204,7 @@ namespace FakeUnreal3
             meta(Fake.Core, Fake.PackageClass, 0);
             meta(Fake.EnginePackage, Fake.PackageClass, 0);
             for (const std::uintptr_t type : { Fake.ObjectClass, Fake.FieldClass, Fake.StructClass, Fake.StateClass, Fake.ClassClass, Fake.PackageClass, Fake.ScriptStructClass,
-                     Fake.EnumClass, Fake.FunctionClass, floatClass, objectClass, structClass, boolClass, arrayClass, nameClass })
+                     Fake.EnumClass, Fake.FunctionClass, floatClass, objectClass, structClass, boolClass, arrayClass, nameClass, delegateClass })
                 meta(type, Fake.ClassClass, Fake.Core);
             for (const std::uintptr_t type : { Fake.Vector, vector2D, linearColor, intPoint })
                 meta(type, Fake.ScriptStructClass, Fake.ObjectClass);
@@ -298,7 +300,8 @@ namespace FakeUnreal3
             Next(Fake.Touch, Fake.Destroy);
             Put<std::uintptr_t>(Fake.Actor, o.Children, Fake.Touch);
 
-            const std::uintptr_t pawn = Property(objectClass, Fake.PlayerController, "Pawn", kPawn, o.Pointer, 0);
+            const std::uintptr_t onTouch = Property(delegateClass, Fake.PlayerController, "OnTouch", kOnTouch, o.Pointer + 8, 0);
+            const std::uintptr_t pawn = Property(objectClass, Fake.PlayerController, "Pawn", kPawn, o.Pointer, onTouch);
             Put<std::uintptr_t>(pawn, o.Extra, Fake.Pawn);
             Next(Fake.Fov, pawn);
             Put<std::uintptr_t>(Fake.PlayerController, o.Children, Fake.Fov);
@@ -335,6 +338,8 @@ namespace FakeUnreal3
             Put<std::int32_t>(Fake.ActorInstance, kTags + o.Pointer + 4, 2);
             Put<std::uintptr_t>(Fake.ControllerInstance, kPawn, Fake.PawnInstance);
             Put<std::uintptr_t>(Fake.ControllerInstance, kWorldInfo, Fake.WorldInfo);
+            Put<std::uintptr_t>(Fake.ControllerInstance, kOnTouch, Fake.ActorInstance);
+            Put<std::uint32_t>(Fake.ControllerInstance, kOnTouch + o.Pointer, Name("Touch"));
             Put<std::uintptr_t>(Fake.PlayerInstance, kPlayerActor, Fake.ControllerInstance);
             Fake.PlayerData = reinterpret_cast<std::uintptr_t>(m_fields) + 0xF200;
             Put<std::uintptr_t>(Fake.PlayerData, 0, Fake.PlayerInstance);

@@ -96,9 +96,14 @@ namespace FakeUnreal
         bool BigStruct = false;
         // The link after the middle property of the big chain is not a pointer: a chain that breaks.
         bool BrokenChain = false;
+        bool Containers = false;
     };
 
     inline constexpr int kLocationDouble = 0x120;
+    inline constexpr int kLookup = 0x30;
+    inline constexpr int kContainersEnd = 0xF8;
+    inline constexpr int kBuffer = 0x140;
+    inline constexpr int kBufferDim = 100;
     inline constexpr int kBigFields = 7000;
     inline constexpr int kBigFirst = 0x100;
     inline constexpr int kBigSize = kBigFirst + 4 * kBigFields;
@@ -237,6 +242,20 @@ namespace FakeUnreal
             const std::uintptr_t location = Field(structClass, Fake.SceneComponent, "RelativeLocation", locationAt, 3 * component, 0);
             Put<std::uintptr_t>(location, o.Extra, Fake.Vector);
             Put<std::uintptr_t>(Fake.SceneComponent, o.ChildProperties, location);
+            if (variant.Containers)
+            {
+                std::uintptr_t next = location;
+                next = Field(FieldClassNamed("MapProperty"), Fake.SceneComponent, "Lookup", kLookup, 0x50, next);
+                next = Field(FieldClassNamed("TextProperty"), Fake.SceneComponent, "Title", 0x80, 0x18, next);
+                next = Field(FieldClassNamed("SoftObjectProperty"), Fake.SceneComponent, "Mesh", 0x98, 0x28, next);
+                next = Field(FieldClassNamed("InterfaceProperty"), Fake.SceneComponent, "Partner", 0xC0, 2 * o.Pointer, next);
+                next = Field(FieldClassNamed("StrProperty"), Fake.SceneComponent, "Label", 0xD0, o.Pointer + 8, next);
+                next = Field(FieldClassNamed("DelegateProperty"), Fake.SceneComponent, "OnHit", 0xE0, 0x10, next);
+                next = Field(FieldClassNamed("WeakObjectProperty"), Fake.SceneComponent, "Target", 0xF0, 8, next);
+                next = Field(FieldClassNamed("ByteProperty"), Fake.SceneComponent, "Buffer", kBuffer, 1, next);
+                Put<std::int32_t>(next, o.FieldDim, kBufferDim);
+                Put<std::uintptr_t>(Fake.SceneComponent, o.ChildProperties, next);
+            }
 
             const std::uintptr_t inner = Field(nameClass, Fake.Actor, "Tags", 0, 8, 0);
             const std::uintptr_t tags = Field(arrayClass, Fake.Actor, "Tags", kTags, o.Pointer + 8, 0);

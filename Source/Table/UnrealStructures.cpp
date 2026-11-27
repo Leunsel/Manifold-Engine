@@ -256,6 +256,12 @@ namespace Manifold::Table
                         Target::kUnrealObjectIndexType);
                     return;
                 }
+                if (kind == "DelegateProperty" && m_runtime.Layout().Ue3)
+                {
+                    Add(offset, Annotated(name + ".Object", "FScriptDelegate"), ValueType::Pointer, m_pointer);
+                    Add(offset + m_pointer, name + ".FunctionName", m_custom ? ValueType::ByteArray : ValueType::EightBytes, 8, FieldDisplay::Hex, Target::kUnrealFNameType);
+                    return;
+                }
                 if (kind == "DelegateProperty")
                 {
                     Add(offset, Annotated(name + ".Object", "FScriptDelegate"), m_custom ? ValueType::ByteArray : ValueType::FourBytes, m_custom ? 8 : 4, FieldDisplay::Unsigned,
@@ -307,7 +313,12 @@ namespace Manifold::Table
                 for (int i = 0; i < dim; ++i)
                 {
                     const std::string name = prefix + f.Name + (f.Dim > 1 ? "[" + std::to_string(i) + "]" : std::string());
-                    Value(f, base + f.Offset + i * std::max(1, f.Size), name, depth);
+                    const int offset = base + f.Offset + i * std::max(1, f.Size);
+                    const std::size_t first = m_specs.size();
+                    Value(f, offset, name, depth);
+                    const int end = i + 1 == dim ? base + f.Offset + f.Dim * std::max(1, f.Size) : offset + std::max(1, f.Size);
+                    if (m_specs.size() > first)
+                        m_specs[first].Cover = std::max(m_specs[first].Cover, end - m_specs[first].Offset);
                 }
             }
 

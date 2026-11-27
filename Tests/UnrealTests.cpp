@@ -194,6 +194,17 @@ namespace Manifold::Tests
             store.Find("FVector")->Fields.resize(1);
             Table::AddUnrealStructures(store, fill, "MyActor");
             CHECK_MSG(store.Find("FVector")->Fields.size() == 1, label + ": a structure the user already has is kept");
+
+            const Table::UnrealFill controller = Table::FillUnrealObject(runtime, fake.ControllerInstance, true);
+            const auto row = [&](const std::string& prefix)
+                { return std::find_if(controller.Fields.begin(), controller.Fields.end(), [&](const Table::StructField& f) { return f.Name.rfind(prefix, 0) == 0; }); };
+            const auto object = row("OnTouch.Object");
+            const auto function = row("OnTouch.FunctionName");
+            CHECK_MSG(object != controller.Fields.end() && object->Offset == kOnTouch && object->Type == Scan::ValueType::Pointer && object->Size == o.Pointer &&
+                object->CustomType.empty(), label + ": UE3 delegate Object is a UObject* at " + Hex(kOnTouch, 0) + ", got " +
+                (object == controller.Fields.end() ? std::string("none") : Hex(object->Offset, 0) + " size " + std::to_string(object->Size) + " custom " + object->CustomType));
+            CHECK_MSG(function != controller.Fields.end() && function->Offset == kOnTouch + o.Pointer && function->CustomType == Target::kUnrealFNameType,
+                label + ": UE3 delegate FunctionName at " + Hex(kOnTouch + o.Pointer, 0) + ", got " + (function == controller.Fields.end() ? std::string("none") : Hex(function->Offset, 0)));
         }
 
         void Ue3SessionAndLua(Engine& engine, const Fake3& fake)
@@ -1080,6 +1091,43 @@ namespace Manifold::Tests
             }
         }
         BigChains(engine);
+        {
+            FakeUnreal::Builder builder;
+            CHECK(builder.Build({ .Containers = true }));
+            const Fake fake = Widen(builder.Fake);
+            Target::UnrealRuntime runtime;
+            const Status status = runtime.Resolve(engine.Process(), Target::UnrealConfig{}, true, nullptr);
+            CHECK_MSG(status.Ok(), "containers: " + status.Text);
+            if (status)
+            {
+                for (const bool custom : { true, false })
+                {
+                    const std::string label = custom ? "containers, custom types" : "containers, no custom types";
+                    const Table::UnrealFill fill = Table::FillUnrealObject(runtime, fake.SceneInstance, custom);
+                    const auto at = [&](const std::string& name, int offset)
+                        { return std::any_of(fill.Fields.begin(), fill.Fields.end(), [&](const Table::StructField& f) { return f.Name.rfind(name, 0) == 0 && f.Offset == offset; }); };
+                    CHECK_MSG(at("Lookup.Elements", FakeUnreal::kLookup) && at("Title", 0x80) && at("Mesh", 0x98) && at("Partner", 0xC0) && at("Label", 0xD0) &&
+                        at("OnHit.Object", 0xE0) && at("Target", 0xF0), label);
+                    std::string inside;
+                    for (const Table::StructField& f : fill.Fields)
+                    {
+                        if (f.Name == "(not reflected)" && f.Offset >= FakeUnreal::kLookup && f.Offset < FakeUnreal::kContainersEnd)
+                            inside += " " + Hex(f.Offset, 0);
+                    }
+                    CHECK_MSG(inside.empty(), label + ": \"(not reflected)\" rows inside properties at" + inside);
+                    CHECK_MSG(at("(not reflected)", FakeUnreal::kContainersEnd), label + ": the gap after the last property is still shown");
+                    const int bufferEnd = FakeUnreal::kBuffer + FakeUnreal::kBufferDim;
+                    std::string elements;
+                    for (const Table::StructField& f : fill.Fields)
+                    {
+                        if (f.Name == "(not reflected)" && f.Offset >= FakeUnreal::kBuffer && f.Offset < bufferEnd)
+                            elements += " " + Hex(f.Offset, 0);
+                    }
+                    CHECK_MSG(at("Buffer[63]", FakeUnreal::kBuffer + 63) && elements.empty(), label + ": \"(not reflected)\" rows inside Buffer[100] at" + elements);
+                    CHECK_MSG(at("(not reflected)", bufferEnd), label + ": the gap after Buffer is still shown");
+                }
+            }
+        }
         for (const bool early : { false, true })
         {
             FakeUnreal3::Builder builder;
