@@ -540,6 +540,58 @@ namespace Manifold::Tests
             CHECK(!ammo->Attribute("ChildStructStart") && !ammo->Attribute("BackgroundColor") && !ammo->Attribute("ExpandChangesAddress"));
         }
 
+        void TableStructureElementRuns()
+        {
+            const std::string input = "<CheatTable><CheatEntries/><Structures StructVersion=\"2\">"
+                "<Structure Name=\"A\"><Elements>"
+                "<Element Offset=\"0\" Vartype=\"Pointer\" Bytesize=\"4\" RLECount=\"2\" OffsetHex=\"00000000\" Description=\"Link\" DisplayMethod=\"unsigned integer\"/>"
+                "<Element Offset=\"8\" Vartype=\"4 Bytes\" Bytesize=\"4\" OffsetHex=\"00000008\" DisplayMethod=\"unsigned integer\"/>"
+                "</Elements></Structure>"
+                "<Structure Name=\"Huge\"><Elements>"
+                "<Element Offset=\"0\" Vartype=\"Byte\" Bytesize=\"1\" RLECount=\"999999999\" DisplayMethod=\"unsigned integer\"/>"
+                "</Elements></Structure>"
+                "<Structure Name=\"Edge\"><Elements>"
+                "<Element Offset=\"" + std::to_string(Table::kMaxFieldOffset - 4) + "\" Vartype=\"4 Bytes\" Bytesize=\"4\" RLECount=\"5\" DisplayMethod=\"unsigned integer\"/>"
+                "</Elements></Structure>"
+                "</Structures></CheatTable>";
+            Table::LoadedTable loaded;
+            CHECK(Table::ParseTable(input, loaded).Ok());
+            CHECK(loaded.Structures.size() == 3);
+            if (loaded.Structures.size() != 3)
+                return;
+            const std::vector<Table::StructField>& fields = loaded.Structures[0]->Fields;
+            CHECK_MSG(fields.size() == 3, "RLECount=2 read as " + std::to_string(fields.size()) + " fields with the element after it, 3 expected");
+            if (fields.size() == 3)
+            {
+                CHECK(fields[0].Offset == 0 && fields[1].Offset == 4 && fields[2].Offset == 8);
+                CHECK(fields[1].Type == Scan::ValueType::Pointer && fields[1].Size == 4 && fields[1].Name == "Link");
+                CHECK(fields[2].Type == Scan::ValueType::FourBytes && fields[2].Name.empty());
+            }
+            CHECK_MSG(loaded.Structures[1]->Fields.size() <= 0x10000, "RLECount=999999999 gave " + std::to_string(loaded.Structures[1]->Fields.size()) + " fields");
+            const std::vector<Table::StructField>& edge = loaded.Structures[2]->Fields;
+            CHECK_MSG(edge.size() == 2, "a run up to kMaxFieldOffset gave " + std::to_string(edge.size()) + " fields, 2 expected");
+            for (const Table::StructField& field : edge)
+                CHECK(field.Offset <= Table::kMaxFieldOffset);
+
+            const std::string copied = "<Elements>"
+                "<Element Offset=\"0\" Vartype=\"Float\" Bytesize=\"4\" RLECount=\"3\" OffsetHex=\"00000000\" Description=\"Axis\" DisplayMethod=\"unsigned integer\"/>"
+                "<Element Offset=\"16\" Vartype=\"Pointer\" Bytesize=\"8\" OffsetHex=\"00000010\" DisplayMethod=\"unsigned integer\" ChildStruct=\"Inner\">"
+                "<Structure Name=\"Inner\"><Elements>"
+                "<Element Offset=\"0\" Vartype=\"4 Bytes\" Bytesize=\"4\" RLECount=\"2\" OffsetHex=\"00000000\" DisplayMethod=\"unsigned integer\"/>"
+                "</Elements></Structure></Element>"
+                "</Elements>";
+            const auto pasted = Table::FieldsFromXml(copied);
+            CHECK(pasted.has_value());
+            if (!pasted)
+                return;
+            CHECK_MSG(pasted->Fields.size() == 4, "pasted RLECount=3 gave " + std::to_string(pasted->Fields.size()) + " fields with the element after it, 4 expected");
+            if (pasted->Fields.size() == 4)
+                CHECK(pasted->Fields[2].Offset == 8 && pasted->Fields[2].Name == "Axis" && pasted->Fields[3].Offset == 16);
+            CHECK(pasted->Structures.size() == 1);
+            if (pasted->Structures.size() == 1)
+                CHECK_MSG(pasted->Structures[0]->Fields.size() == 2, "nested RLECount=2 gave " + std::to_string(pasted->Structures[0]->Fields.size()) + " fields");
+        }
+
         void AutoAssemblerOffline()
         {
             Asm::AaHost host;
@@ -2312,6 +2364,7 @@ hostileRan = true
         TableDisassemblerComments();
         TableStructureCustomType();
         TableStructureElementAttributes();
+        TableStructureElementRuns();
         AutoAssemblerOffline();
         CodeSearchHelpers();
         ScanKinds();

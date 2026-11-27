@@ -387,6 +387,23 @@ namespace Manifold::Table
             return field;
         }
 
+        constexpr std::size_t kMaxRunFields = 0x10000;
+
+        void AddElement(std::vector<StructField>& fields, const Xml::Node& element)
+        {
+            fields.push_back(ReadElement(element));
+            const StructField first = fields.back();
+            const std::int64_t count = ParseDecimal(element.Attribute("RLECount").value_or("1")).value_or(1);
+            for (std::int64_t i = 1; i < count && fields.size() < kMaxRunFields; ++i)
+            {
+                const std::int64_t offset = first.Offset + i * first.Size;
+                if (offset > kMaxFieldOffset)
+                    break;
+                fields.push_back(first);
+                fields.back().Offset = static_cast<int>(offset);
+            }
+        }
+
         std::unique_ptr<StructDefinition> ReadStructure(const Xml::Node& node)
         {
             auto definition = std::make_unique<StructDefinition>();
@@ -395,7 +412,7 @@ namespace Manifold::Table
             if (!elements)
                 return definition;
             for (const Xml::Node* element : elements->ChildrenNamed("Element"))
-                definition->Fields.push_back(ReadElement(*element));
+                AddElement(definition->Fields, *element);
             definition->Sort();
             return definition;
         }
@@ -758,7 +775,7 @@ namespace Manifold::Table
             return std::nullopt;
         PastedFields pasted;
         for (const Xml::Node* element : elements->ChildrenNamed("Element"))
-            pasted.Fields.push_back(ReadElement(*element));
+            AddElement(pasted.Fields, *element);
         if (pasted.Fields.empty())
             return std::nullopt;
         std::set<std::string> seen;
