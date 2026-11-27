@@ -769,7 +769,7 @@ namespace Manifold::Target
         if (classIndex < 0 || classIndex >= static_cast<int>(m_bridge.m_classes.size()))
             return;
         MonoClass& info = m_bridge.m_classes[static_cast<std::size_t>(classIndex)];
-        if (info.ValueTypesRead)
+        if (info.ValueTypesRead || !info.MembersLoaded)
             return;
         info.ValueTypesRead = true;
         if (!info.Handle || !m_bridge.Fn("mono_class_get_field_from_name") || !m_bridge.Fn("mono_class_from_mono_type"))

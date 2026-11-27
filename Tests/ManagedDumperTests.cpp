@@ -542,6 +542,39 @@ namespace Manifold::Tests
             engine.CloseProcess();
         }
 
+        void CheckFrozenValueTypes(const std::filesystem::path& targetPath, bool membersFirst)
+        {
+            const std::string label = membersFirst ? "members read before the freeze" : "nothing read before the freeze";
+            AgentTarget target;
+            const bool started = target.Start(targetPath, L"--mono-values");
+            CHECK_MSG(started, "could not start the test target with --mono-values");
+            if (!started)
+                return;
+            Settings settings;
+            Engine engine(settings);
+            const Status opened = engine.OpenProcess(MakeProcessId(target.Info.dwProcessId));
+            CHECK_MSG(opened.Ok(), opened.Text);
+            if (!opened)
+                return;
+            const Status mono = engine.Managed().Ensure();
+            CHECK_MSG(mono.Ok(), label + ": " + mono.Text);
+            if (!mono)
+                return;
+            if (membersFirst)
+                CHECK_EQ(engine.Mono().FieldsOf("Game.Mover").size(), 4u);
+            const Target::Process& process = *engine.Process();
+            CHECK(process.Suspend());
+            engine.Mono().TypedFieldsOf("Game.Mover");
+            CHECK(process.Resume());
+            ::Sleep(300);
+            const std::vector<Target::MonoField> fields = engine.Mono().TypedFieldsOf("Game.Mover");
+            const auto position = std::find_if(fields.begin(), fields.end(), [](const Target::MonoField& field) { return field.Name == "position"; });
+            CHECK_MSG(position != fields.end() && position->TypeHandle && position->TypeName == "Game.Vec3",
+                label + ": position after the worker ran again: " + (position != fields.end() ? "'" + position->TypeName + "'" : std::string("missing")) + ", "
+                    + std::to_string(fields.size()) + " fields");
+            engine.CloseProcess();
+        }
+
         void CheckChildDomain(const std::filesystem::path& targetPath)
         {
             AgentTarget target;
@@ -593,6 +626,7 @@ namespace Manifold::Tests
         {
             CheckChildDomain(targetPath);
             CheckValueTypes(targetPath, L"--mono-values");
+            CheckFrozenValueTypes(targetPath, false);
             if (Target::ManagedDumperImage().empty())
             {
                 Skip("this build embedded no managed dumper, so the agent was not run in " + targetPath.filename().string());
