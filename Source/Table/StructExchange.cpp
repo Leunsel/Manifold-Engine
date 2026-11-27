@@ -1811,13 +1811,20 @@ namespace Manifold::Table
                 {
                     for (StructField& field : parsed.Definition.Fields)
                         field.Offset += m_pointer;
+                    std::erase_if(parsed.Definition.Fields, [&](const StructField& field)
+                        {
+                            if (field.Offset < kMaxFieldOffset)
+                                return false;
+                            Warn(Peek().Line, Format("%s lies beyond the largest offset a dissect field can have (%X); it is left out", field.Name.c_str(), kMaxFieldOffset));
+                            return true;
+                        });
                     StructField table;
                     table.Name = "vftable";
                     table.Type = Scan::ValueType::Pointer;
                     table.Size = m_pointer;
                     table.Display = FieldDisplay::Hex;
                     parsed.Definition.Fields.insert(parsed.Definition.Fields.begin(), table);
-                    layout.Offset += m_pointer;
+                    layout.Offset = std::min(layout.Offset + m_pointer, kMaxFieldOffset);
                     layout.UnionSize += m_pointer;
                     layout.Align = std::max(layout.Align, std::min(m_pointer, layout.Pack));
                 }

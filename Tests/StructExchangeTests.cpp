@@ -306,6 +306,7 @@ namespace Manifold::Tests
                 { "[StructLayout(LayoutKind.Explicit)] public struct S { [FieldOffset(0x8)] public int k; [FieldOffset(0x100000004)] public int a; };", 8, "k", "a lies beyond" },
                 { "[StructLayout(LayoutKind.Explicit)] public struct S { [FieldOffset(0x8)] public int k; [FieldOffset(0x80000000)] public int a; public int b; };", 8, "k", "a lies beyond" },
                 { "[StructLayout(LayoutKind.Sequential, Size = 0x20000000)] public struct S { public int k; };", 0, "k", "" },
+                { "struct S { virtual void f(); char p[0xFFFFFF0]; int a[4]; };", 0xFFFFFFC, "a[1]", "a[2] lies beyond" },
             };
             for (const Case& test : kCases)
             {
