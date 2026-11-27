@@ -183,6 +183,75 @@ namespace Manifold::Tests
             }
         }
 
+        struct Pages
+        {
+            static constexpr std::size_t kPage = 4096;
+            std::uint8_t* Data = nullptr;
+
+            Pages() { Data = static_cast<std::uint8_t*>(::VirtualAlloc(nullptr, 3 * kPage, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE)); }
+            ~Pages()
+            {
+                if (Data)
+                    ::VirtualFree(Data, 0, MEM_RELEASE);
+            }
+            Pages(const Pages&) = delete;
+            Pages& operator=(const Pages&) = delete;
+
+            std::uint64_t At(std::size_t offset) const { return reinterpret_cast<std::uint64_t>(Data) + offset; }
+            bool Middle(DWORD protect)
+            {
+                DWORD old = 0;
+                return ::VirtualProtect(Data + kPage, kPage, protect, &old) != FALSE;
+            }
+        };
+
+        std::uint64_t NextCount(const std::shared_ptr<Target::Process>& process, Scanner& scanner, ScanOptions options, Compare mode)
+        {
+            options.Mode = mode;
+            return scanner.Start(process, options, false) && Wait(scanner) ? scanner.Count() : ~0ull;
+        }
+
+        void UnreadablePages(const std::shared_ptr<Target::Process>& process)
+        {
+            Pages pages;
+            CHECK(pages.Data != nullptr);
+            if (!pages.Data)
+                return;
+            const std::int32_t value = 1234;
+            for (std::size_t page = 0; page < 3; ++page)
+                std::memcpy(pages.Data + page * Pages::kPage + 0x100, &value, sizeof(value));
+            ScanOptions options;
+            options.Type = ValueType::FourBytes;
+            options.Value = "1234";
+            options.Start = pages.At(0);
+            options.Stop = pages.At(3 * Pages::kPage);
+            options.Alignment = 4;
+            Scanner changed;
+            Scanner unchanged;
+            const bool first = changed.Start(process, options, true) && Wait(changed) && unchanged.Start(process, options, true) && Wait(unchanged);
+            CHECK_MSG(first && changed.Count() == 3 && unchanged.Count() == 3, Format("exact 1234 over three pages: %llu results", static_cast<unsigned long long>(changed.Count())));
+            CHECK(pages.Middle(PAGE_NOACCESS));
+            const std::uint64_t kept = NextCount(process, changed, options, Compare::Changed);
+            ScanRecord record;
+            const bool middle = kept == 1 && changed.Record(0, record) && record.Address == pages.At(Pages::kPage + 0x100);
+            CHECK_MSG(kept == 0, Format("next scan Changed with the middle page unreadable: %llu kept%s", static_cast<unsigned long long>(kept), middle ? ", the one on the middle page" : ""));
+            const std::uint64_t same = NextCount(process, unchanged, options, Compare::Unchanged);
+            CHECK_MSG(same == 2, Format("next scan Unchanged with the middle page unreadable: %llu kept", static_cast<unsigned long long>(same)));
+            CHECK(pages.Middle(PAGE_READWRITE));
+
+            std::memset(pages.Data, 0x11, 3 * Pages::kPage);
+            options.Mode = Compare::Unknown;
+            options.Value.clear();
+            const bool snapshot = changed.Start(process, options, true) && Wait(changed) && unchanged.Start(process, options, true) && Wait(unchanged);
+            CHECK_MSG(snapshot && changed.IsSnapshot() && unchanged.IsSnapshot(), "unknown initial value over three pages");
+            CHECK(pages.Middle(PAGE_NOACCESS));
+            const std::uint64_t snapshotKept = NextCount(process, changed, options, Compare::Changed);
+            CHECK_MSG(snapshotKept == 0, Format("next scan Changed from a snapshot with the middle page unreadable: %llu kept", static_cast<unsigned long long>(snapshotKept)));
+            const std::uint64_t snapshotSame = NextCount(process, unchanged, options, Compare::Unchanged);
+            CHECK_MSG(snapshotSame == 2 * Pages::kPage / 4, Format("next scan Unchanged from a snapshot with the middle page unreadable: %llu kept", static_cast<unsigned long long>(snapshotSame)));
+            CHECK(pages.Middle(PAGE_READWRITE));
+        }
+
         int RunScanBufferTests()
         {
             const int before = Totals().Failures;
@@ -193,6 +262,7 @@ namespace Manifold::Tests
             const std::shared_ptr<Target::Process> process = *opened;
             PatternReads(*process);
             ValueReads(process);
+            UnreadablePages(process);
             return Totals().Failures - before;
         }
     }

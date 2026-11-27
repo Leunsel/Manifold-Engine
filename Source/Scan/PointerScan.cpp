@@ -564,9 +564,18 @@ namespace Manifold::Scan
     Status PointerResults::Save(const std::filesystem::path& path) const
     {
         const std::string name = WideToUtf8(path.filename().wstring());
-        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        std::filesystem::path temporary = path;
+        temporary += L"." + std::to_wstring(::GetCurrentProcessId()) + L".tmp";
+        std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+        const auto failed = [&]()
+            {
+                out.close();
+                std::error_code ignored;
+                std::filesystem::remove(temporary, ignored);
+                return Status::Fail(ErrorCode::PointerFileUnwritable, name);
+            };
         if (!out)
-            return Status::Fail(ErrorCode::PointerFileUnwritable, name);
+            return failed();
         std::vector<std::uint8_t> head(kFileMagic, kFileMagic + sizeof(kFileMagic));
         Put(head, static_cast<std::uint32_t>(m_pointerSize));
         Put(head, static_cast<std::uint32_t>(m_levels));
@@ -587,13 +596,13 @@ namespace Manifold::Scan
         {
             const std::size_t got = ReadRaw(index, kRescanRecords, block.data());
             if (got == 0)
-                return Status::Fail(ErrorCode::PointerFileUnwritable, name);
+                return failed();
             out.write(reinterpret_cast<const char*>(block.data()), static_cast<std::streamsize>(got * m_recordSize));
             index += got;
         }
-        out.flush();
-        if (!out)
-            return Status::Fail(ErrorCode::PointerFileUnwritable, name);
+        out.close();
+        if (!out || !::MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            return failed();
         return Status::Success();
     }
 

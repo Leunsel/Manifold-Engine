@@ -743,6 +743,31 @@ namespace Manifold::Scan
             return types;
         }
 
+        void ReadSpans(const Target::Process& process, std::uint64_t address, std::uint8_t* buffer, std::size_t size, std::vector<std::pair<std::size_t, std::size_t>>& spans)
+        {
+            spans.clear();
+            if (process.ReadExact(address, buffer, size))
+            {
+                spans.emplace_back(0, size);
+                return;
+            }
+            for (const Target::RegionInfo& region : process.Regions(address, address + size))
+            {
+                const std::uint64_t from = std::max(region.Base, address);
+                const std::uint64_t to = std::min(region.End(), address + size);
+                if (!region.Readable() || to <= from)
+                    continue;
+                const std::size_t begin = static_cast<std::size_t>(from - address);
+                const std::size_t end = begin + process.Read(from, buffer + begin, static_cast<std::size_t>(to - from));
+                if (end == begin)
+                    continue;
+                if (!spans.empty() && spans.back().second == begin)
+                    spans.back().second = end;
+                else
+                    spans.emplace_back(begin, end);
+            }
+        }
+
         bool Fractional(std::string_view text)
         {
             return TrimView(text).find_first_of(".,") != std::string_view::npos;
@@ -1546,6 +1571,7 @@ namespace Manifold::Scan
                     const std::size_t windowRead = std::max<std::size_t>(kWindowBytes, static_cast<std::size_t>(valueSize));
                     std::vector<std::uint8_t> window(windowRead + kGroupMaxBytes + 64);
                     std::vector<std::uint8_t> current;
+                    std::vector<std::pair<std::size_t, std::size_t>> spans;
                     std::vector<Segment> localSegments;
                     std::optional<SavedLookup> lookup;
                     if (againstSaved)
@@ -1571,53 +1597,57 @@ namespace Manifold::Scan
                             const Snapshot& snapshot = previous->Snapshots[item];
                             input.resize(static_cast<std::size_t>(snapshot.Size));
                             current.resize(static_cast<std::size_t>(snapshot.Size));
-                            if (!previous->Files[static_cast<std::size_t>(snapshot.File)]->ReadAt(snapshot.Offset, input.data(), input.size()) ||
-                                process->Read(snapshot.Base, current.data(), current.size()) == 0)
+                            if (!previous->Files[static_cast<std::size_t>(snapshot.File)]->ReadAt(snapshot.Offset, input.data(), input.size()))
                             {
                                 m_done += snapshot.Size;
                                 continue;
                             }
-                            if (againstSaved)
+                            ReadSpans(*process, snapshot.Base, current.data(), current.size(), spans);
+                            for (const auto& [from, to] : spans)
                             {
-                                for (std::uint64_t position = 0; position < snapshot.Positions && !storeFailed; ++position)
+                                const std::size_t begin = (from + static_cast<std::size_t>(alignment) - 1) / static_cast<std::size_t>(alignment) * static_cast<std::size_t>(alignment);
+                                if (againstSaved)
                                 {
-                                    const std::size_t offset = static_cast<std::size_t>(position * static_cast<std::uint64_t>(alignment));
-                                    if (offset + static_cast<std::size_t>(valueSize) > current.size())
-                                        break;
-                                    const std::uint8_t* now = current.data() + offset;
-                                    const std::uint8_t* before = input.data() + offset;
-                                    const std::uint64_t address = snapshot.Base + offset;
-                                    if (mixed)
+                                    for (std::uint64_t position = begin / static_cast<std::size_t>(alignment); position < snapshot.Positions && !storeFailed; ++position)
                                     {
-                                        for (ValueType type : previous->AllList)
+                                        const std::size_t offset = static_cast<std::size_t>(position * static_cast<std::uint64_t>(alignment));
+                                        if (offset + static_cast<std::size_t>(valueSize) > to)
+                                            break;
+                                        const std::uint8_t* now = current.data() + offset;
+                                        const std::uint8_t* before = input.data() + offset;
+                                        const std::uint64_t address = snapshot.Base + offset;
+                                        if (mixed)
                                         {
-                                            const Matcher* test = typed.Find(type);
-                                            const std::uint8_t* against = test ? compareWith(address, type, before, before) : nullptr;
-                                            if (against && test->Test(now, against, before) && !write(address, type, now, before))
-                                                break;
+                                            for (ValueType type : previous->AllList)
+                                            {
+                                                const Matcher* test = typed.Find(type);
+                                                const std::uint8_t* against = test ? compareWith(address, type, before, before) : nullptr;
+                                                if (against && test->Test(now, against, before) && !write(address, type, now, before))
+                                                    break;
+                                            }
+                                            continue;
                                         }
-                                        continue;
+                                        const std::uint8_t* against = compareWith(address, singleType, before, before);
+                                        if (against && matcher.Test(now, against, before) && !write(address, singleType, now, before))
+                                            break;
                                     }
-                                    const std::uint8_t* against = compareWith(address, singleType, before, before);
-                                    if (against && matcher.Test(now, against, before) && !write(address, singleType, now, before))
-                                        break;
-                                }
-                            }
-                            else
-                            {
-                                const std::size_t usable = current.size() >= static_cast<std::size_t>(valueSize) ? current.size() - static_cast<std::size_t>(valueSize) + 1 : 0;
-                                const std::size_t limit = static_cast<std::size_t>(std::min<std::uint64_t>(snapshot.Positions * static_cast<std::uint64_t>(alignment), usable));
-                                const std::uint8_t* now = current.data();
-                                const std::uint8_t* before = input.data();
-                                if (mixed)
-                                {
-                                    auto emit = [&](std::uint32_t offset, ValueType type) { return write(snapshot.Base + offset, type, now + offset, before + offset); };
-                                    ScanTypes(typed, previous->AllList, now, before, before, 0, limit, static_cast<std::size_t>(alignment), hits, emit);
                                 }
                                 else
                                 {
-                                    auto emit = [&](std::size_t offset) { return write(snapshot.Base + offset, singleType, now + offset, before + offset); };
-                                    matcher.Scan(now, before, before, 0, limit, static_cast<std::size_t>(alignment), emit);
+                                    const std::size_t usable = to >= static_cast<std::size_t>(valueSize) ? to - static_cast<std::size_t>(valueSize) + 1 : 0;
+                                    const std::size_t limit = static_cast<std::size_t>(std::min<std::uint64_t>(snapshot.Positions * static_cast<std::uint64_t>(alignment), usable));
+                                    const std::uint8_t* now = current.data();
+                                    const std::uint8_t* before = input.data();
+                                    if (mixed)
+                                    {
+                                        auto emit = [&](std::uint32_t offset, ValueType type) { return write(snapshot.Base + offset, type, now + offset, before + offset); };
+                                        ScanTypes(typed, previous->AllList, now, before, before, begin, limit, static_cast<std::size_t>(alignment), hits, emit);
+                                    }
+                                    else
+                                    {
+                                        auto emit = [&](std::size_t offset) { return write(snapshot.Base + offset, singleType, now + offset, before + offset); };
+                                        matcher.Scan(now, before, before, begin, limit, static_cast<std::size_t>(alignment), emit);
+                                    }
                                 }
                             }
                             m_done += snapshot.Size;
@@ -1648,7 +1678,8 @@ namespace Manifold::Scan
                                     if (address < windowBase || address + static_cast<std::uint64_t>(valueSize) > windowBase + windowSize)
                                     {
                                         windowBase = address;
-                                        windowSize = process->Read(address, window.data(), windowRead);
+                                        ReadSpans(*process, address, window.data(), windowRead, spans);
+                                        windowSize = !spans.empty() && spans.front().first == 0 ? spans.front().second : 0;
                                         if (windowSize < static_cast<std::size_t>(valueSize))
                                         {
                                             windowBase = 0;
