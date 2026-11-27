@@ -569,6 +569,41 @@ namespace Manifold::Tests
                 bounded.Record("Many", std::move(before), many.Fields, "Add Field");
             }
             CHECK_EQ(bounded.UndoCount(), Table::StructureHistory::kLimit);
+
+            Table::StructDefinition& wide = store.Add("Wide");
+            const std::size_t fields = Table::StructureHistory::kLimit + 50;
+            for (std::size_t i = 0; i < fields; ++i)
+                wide.Fields.push_back(MakeField(static_cast<int>(i) * 4, "F", Scan::ValueType::FourBytes, 4));
+            Table::StructureHistory large;
+            for (std::size_t i = 0; i < fields; ++i)
+            {
+                std::vector<Table::StructField> before = wide.Fields;
+                wide.Fields.erase(wide.Fields.begin());
+                large.Record("Wide", std::move(before), wide.Fields, "Delete Fields", {}, 9);
+            }
+            CHECK_MSG(large.UndoCount() <= Table::StructureHistory::kLimit, std::to_string(large.UndoCount()) + " steps for one structure in one group");
+            CHECK(large.Undo(store));
+            CHECK_MSG(wide.Fields.size() == fields, std::to_string(wide.Fields.size()) + " fields after the undo");
+            CHECK(!large.CanUndo());
+            CHECK(large.Redo(store) && wide.Fields.empty() && !large.CanRedo());
+
+            Table::StructureHistory spread;
+            std::vector<std::string> names;
+            for (std::size_t i = 0; i < fields; ++i)
+            {
+                names.push_back("Spread " + std::to_string(i));
+                Table::StructDefinition& one = store.Add(names.back());
+                one.Fields = { MakeField(0, "F", Scan::ValueType::FourBytes, 4) };
+                std::vector<Table::StructField> before = one.Fields;
+                one.Fields.clear();
+                spread.Record(one.Name, std::move(before), one.Fields, "Delete Fields", {}, 11);
+            }
+            CHECK(spread.Undo(store));
+            std::size_t restored = 0;
+            for (const std::string& name : names)
+                restored += store.Find(name)->Fields.size();
+            CHECK_MSG(restored == fields, std::to_string(restored) + " structures back after the undo");
+            CHECK(!spread.CanUndo());
         }
     }
 
