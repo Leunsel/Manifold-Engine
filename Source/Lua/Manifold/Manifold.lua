@@ -1702,11 +1702,12 @@ define(unreal, "fields", {
   params = {
     { name = "type", type = "string|integer" },
     { name = "ownOnly", type = "boolean", optional = true },
+    { name = "limit", type = "integer", optional = true },
   },
-  returns = "list of fields, or nil, error",
-  doc = "The reflected properties of a class or struct, its parents' included unless `ownOnly`, sorted by offset. " .. FIELD_TEXT,
-}, function(type, ownOnly)
-  return result(native.unrealFields(type, ownOnly == true))
+  returns = "list of fields, complete; or nil, error",
+  doc = "The reflected properties of a class or struct, its parents' included unless `ownOnly`, sorted by offset. `limit` caps the entries read of each class's property chain: 8,192 by default, never fewer and at most 131,072. `complete` is false when a chain was not read to its end (more entries than `limit`, a broken link, or a link back to an earlier entry): the list then misses properties, and a higher `limit` reads more of a long chain. " .. FIELD_TEXT,
+}, function(type, ownOnly, limit)
+  return many(native.unrealFields(type, ownOnly == true, limit))
 end)
 
 define(unreal, "field", {
@@ -1715,7 +1716,7 @@ define(unreal, "field", {
     { name = "name", type = "string" },
   },
   returns = "field, or nil, error",
-  doc = "One property by name, any case, searched in the parents too; `ME-4203` when there is none. " .. FIELD_TEXT,
+  doc = "One property by name, any case, searched in the parents too; `ME-4203` when there is none, `ME-4205` when it is not among the properties read so far because a chain was not read to its end. " .. FIELD_TEXT,
 }, function(type, name)
   return result(native.unrealField(type, name))
 end)

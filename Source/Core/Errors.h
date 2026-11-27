@@ -94,6 +94,7 @@
     X(UnrealUnknownType, 4202) \
     X(UnrealNoProperty, 4203) \
     X(UnrealNoObject, 4204) \
+    X(UnrealIncomplete, 4205) \
     X(RttiNoObject, 4301) \
     X(RttiUnknownClass, 4302) \
     X(WindowClassFailed, 5001) \

@@ -569,10 +569,13 @@ namespace Manifold::Lua
         int Fields(lua_State* state)
         {
             const bool own = lua_toboolean(state, 2) != 0;
+            const int limit = static_cast<int>(std::clamp<lua_Integer>(luaL_optinteger(state, 3, UnrealRuntime::kMaxFields), UnrealRuntime::kMaxFields, 16 * UnrealRuntime::kMaxFields));
             return TypeQuery(state, [&](const UnrealRuntime& runtime, std::uint64_t type)
                 {
-                    PushFields(state, runtime, runtime.HasStructLayout(type) ? runtime.Fields(type, own) : std::vector<Target::UnrealField>{});
-                    return 1;
+                    const Target::UnrealFieldList list = runtime.HasStructLayout(type) ? runtime.FieldList(type, own, limit) : Target::UnrealFieldList{};
+                    PushFields(state, runtime, list.Fields);
+                    lua_pushboolean(state, list.Complete);
+                    return 2;
                 });
         }
 
@@ -583,7 +586,8 @@ namespace Manifold::Lua
                 {
                     const auto field = runtime.HasStructLayout(type) ? runtime.FindField(type, name) : std::nullopt;
                     if (!field)
-                        return PushFailure(state, ErrorCode::UnrealNoProperty, runtime.NameOf(type).value_or("?") + "." + name);
+                        return PushFailure(state, runtime.HasStructLayout(type) && !runtime.FieldList(type).Complete ? ErrorCode::UnrealIncomplete : ErrorCode::UnrealNoProperty,
+                            runtime.NameOf(type).value_or("?") + "." + name);
                     PushField(state, runtime, *field);
                     return 1;
                 });

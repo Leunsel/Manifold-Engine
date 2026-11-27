@@ -7061,11 +7061,12 @@ define(unreal, "fields", {
   params = {
     { name = "type", type = "string|integer" },
     { name = "ownOnly", type = "boolean", optional = true },
+    { name = "limit", type = "integer", optional = true },
   },
-  returns = "list of fields, or nil, error",
-  doc = "The reflected properties of a class or struct, its parents' included unless `ownOnly`, sorted by offset. " .. FIELD_TEXT,
-}, function(type, ownOnly)
-  return result(native.unrealFields(type, ownOnly == true))
+  returns = "list of fields, complete; or nil, error",
+  doc = "The reflected properties of a class or struct, its parents' included unless `ownOnly`, sorted by offset. `limit` caps the entries read of each class's property chain: 8,192 by default, never fewer and at most 131,072. `complete` is false when a chain was not read to its end (more entries than `limit`, a broken link, or a link back to an earlier entry): the list then misses properties, and a higher `limit` reads more of a long chain. " .. FIELD_TEXT,
+}, function(type, ownOnly, limit)
+  return many(native.unrealFields(type, ownOnly == true, limit))
 end)
 
 define(unreal, "field", {
@@ -7074,7 +7075,8 @@ define(unreal, "field", {
     { name = "name", type = "string" },
   },
   returns = "field, or nil, error",
-  doc = "One property by name, any case, searched in the parents too; `ME-4203` when there is none. " .. FIELD_TEXT,
+)MLUA"),
+            std::string_view(R"MLUA(  doc = "One property by name, any case, searched in the parents too; `ME-4203` when there is none, `ME-4205` when it is not among the properties read so far because a chain was not read to its end. " .. FIELD_TEXT,
 }, function(type, name)
   return result(native.unrealField(type, name))
 end)
@@ -7085,8 +7087,7 @@ define(unreal, "offset", {
     { name = "name", type = "string" },
   },
   returns = "symbol, offset, or nil, error",
-)MLUA"),
-            std::string_view(R"MLUA(  doc = "The offset symbol of a property (`Actor_RootComponent`) and its value. The symbol works in address expressions in every session, so records written with it keep working after a game update.",
+  doc = "The offset symbol of a property (`Actor_RootComponent`) and its value. The symbol works in address expressions in every session, so records written with it keep working after a game update.",
 }, function(type, name)
   return many(native.unrealSymbol(type, name))
 end)
@@ -7314,7 +7315,8 @@ define(rtti, "mangle", {
   return native.rttiMangle(name)
 end)
 
-define(rtti, "dissect", {
+)MLUA"),
+            std::string_view(R"MLUA(define(rtti, "dissect", {
   params = { { name = "address", type = "address" } },
   returns = "true, or nil, error",
   doc = "Opens Structure Dissect on the object at or before the address, with a structure named after its class; the structure is made, labelled and given its embedded members when none of that name exists.",
@@ -7324,8 +7326,7 @@ end)
 
 define(rtti, "label", {
   params = {
-)MLUA"),
-            std::string_view(R"MLUA(    { name = "structure", type = "any" },
+    { name = "structure", type = "any" },
     { name = "address", type = "address" },
   },
   returns = "number of labelled fields, or nil, error",
@@ -7483,7 +7484,8 @@ do
   define(rebase, "get", {
     params = { { name = "module", type = "string" } },
     returns = "entry, or nil",
-    doc = entryDoc("The rebase of the module, or nil when it is shown where it is loaded."),
+)MLUA"),
+            std::string_view(R"MLUA(    doc = entryDoc("The rebase of the module, or nil when it is shown where it is loaded."),
   }, function(module)
     return native.rebaseGet(module)
   end)
@@ -7499,8 +7501,7 @@ do
   define(rebase, "list", {
     returns = "list of entries",
     doc = entryDoc("Every rebased module, by name."),
-)MLUA"),
-            std::string_view(R"MLUA(  }, function()
+  }, function()
     return native.rebaseList()
   end)
 
@@ -7671,15 +7672,15 @@ do
 
   define(crash, "start", {
     returns = "true, or nil, error",
-    doc = "Starts the crash watch in the open process now, without waiting for a script to write code. Loads the agent library into the game. `ME-1021` when it cannot.",
+)MLUA"),
+            std::string_view(R"MLUA(    doc = "Starts the crash watch in the open process now, without waiting for a script to write code. Loads the agent library into the game. `ME-1021` when it cannot.",
   }, function()
     return result(native.crashStart())
   end)
 
   define(crash, "scripts", {
     returns = "list of `{ script, recordId, on, ranges, warnings }`",
-)MLUA"),
-            std::string_view(R"MLUA(    doc = "What the scripts put into the open process, as the crash watch matches it: per run that changed the game its label (the record's description, or for a script run from Lua the record whose Lua ran it), record id, whether it is still on, `ranges` of `{ address, size, kind, name }` with `kind` `\"alloc\"` or `\"patch\"`, and `warnings` of `{ line, text }`: what the Auto Assembler's stack check found, such as a push without its pop before the jump back.",
+    doc = "What the scripts put into the open process, as the crash watch matches it: per run that changed the game its label (the record's description, or for a script run from Lua the record whose Lua ran it), record id, whether it is still on, `ranges` of `{ address, size, kind, name }` with `kind` `\"alloc\"` or `\"patch\"`, and `warnings` of `{ line, text }`: what the Auto Assembler's stack check found, such as a push without its pop before the jump back.",
   }, function()
     return native.crashScripts()
   end)
@@ -7864,15 +7865,15 @@ define(doc, "register", {
   return docResult(native.docRegister(target, spec))
 end)
 
-define(doc, "registerModule", {
+)MLUA"),
+            std::string_view(R"MLUA(define(doc, "registerModule", {
   params = {
     { name = "path", type = "string" },
     { name = "module", type = "table" },
     { name = "options", type = "table", optional = true, keys = { doc = "string" } },
   },
   returns = "number of registered functions, or nil, error",
-)MLUA"),
-            std::string_view(R"MLUA(  doc = "Documents every function of a module table under `path` (such as `\"ManifoldGodot\"`), from the LuaLS annotations above each function, or its parameter names when it has none. `options.doc` describes the module. Call it again after adding functions.",
+  doc = "Documents every function of a module table under `path` (such as `\"ManifoldGodot\"`), from the LuaLS annotations above each function, or its parameter names when it has none. `options.doc` describes the module. Call it again after adding functions.",
 }, function(path, module, options)
   return docResult(native.docRegisterModule(path, module, options))
 end)
@@ -8091,14 +8092,14 @@ local function checkColor(path, name, value)
     return
   end
   if not UI_COLOR_SET[value:lower()] and not value:match("^#%x%x%x%x%x%x$") and not value:match("^#%x%x%x%x%x%x%x%x$") then
-    misuse(("%s: %s %q is no theme colour (%s) and no #RRGGBB or #RRGGBBAA"):format(path, name, value, table.concat(UI_COLORS, ", ")))
+)MLUA"),
+            std::string_view(R"MLUA(    misuse(("%s: %s %q is no theme colour (%s) and no #RRGGBB or #RRGGBBAA"):format(path, name, value, table.concat(UI_COLORS, ", ")))
   end
 end
 
 local function checkIcon(path, value)
   if value ~= nil and value ~= "" and not native.uiIsIcon(value) then
-)MLUA"),
-            std::string_view(R"MLUA(    local near = native.uiIcons(value:sub(1, math.min(#value, 4)))
+    local near = native.uiIcons(value:sub(1, math.min(#value, 4)))
     local hint = #near > 0 and (" (similar: " .. table.concat(near, ", ", 1, math.min(#near, 6)) .. ")") or ""
     misuse(("%s: icon %q is no Font Awesome icon%s; manifold.ui.theme.icons lists them"):format(path, value, hint))
   end
@@ -8414,14 +8415,14 @@ widgetObject = function(entry)
     return updateEntry(prefix .. ".setRow", entry, WIDGET_KEYS.table, { rows = rows })
   end)
   method("removeRow", { params = { { name = "row", type = "integer" } } }, function(row)
-    local rows = rowsOf("removeRow")
+)MLUA"),
+            std::string_view(R"MLUA(    local rows = rowsOf("removeRow")
     if not rows then
       return gone("table")
     end
     rowIndex("removeRow", rows, row)
     table.remove(rows, row)
-)MLUA"),
-            std::string_view(R"MLUA(    -- the selection stays on its row: one above it moves it up, and removing the selected row clears it
+    -- the selection stays on its row: one above it moves it up, and removing the selected row clears it
     local selected = native.uiGet(entry.id)
     local update = { rows = rows }
     if selected ~= nil and row == selected then
@@ -8631,9 +8632,9 @@ native.docDefine(nil, "manifold.ui.window.Widget", {
   kind = "class",
   title = "Widget objects",
   doc = table.concat({
-    "`add` returns a widget object, with the same rules as a window object. Every widget takes `visible`, `enabled`, `tooltip`, `width` and `height` (points; 0 or missing means automatic; a negative `width` fills the rest of the line); `minWidth` and `maxWidth` keep fields, buttons and lists within that range, and a text wraps at `maxWidth`. Nothing is drawn outside its place: a text, heading or button wider than its place ends in `...` and shows all of it as a tooltip; a text or heading with `overflow = \"wrap\"` breaks into lines instead (text only), `\"clip\"` is cut at the edge, `\"visible\"` keeps its own width. A window cannot be made narrower than its widgets need (their smallest sizes: a field 80 points, a button its padding and a few characters). Handlers get the widget as their last argument.",
 )MLUA"),
-            std::string_view(R"MLUA(    "- Labels of fields (`input`, `number`, `slider`, `combo`, `radio`, `color`): `labelPosition` is `left` (the default: the labels of one column, section or window share a column and the fields line up after it, and a checkbox among them lines up with the fields), `above` or `right` (after the field). Set on a window, column, section, tab or split it is the default for the fields inside. When none is set and a column is too narrow for the labels beside the fields, the labels go above them instead. A field fills the rest of its line unless it has a `width`, so no label is cut off; a negative `height` makes a table, tree, canvas, scrolling column or tab, multi-line input or section fill the height that is left.",
+            std::string_view(R"MLUA(    "`add` returns a widget object, with the same rules as a window object. Every widget takes `visible`, `enabled`, `tooltip`, `width` and `height` (points; 0 or missing means automatic; a negative `width` fills the rest of the line); `minWidth` and `maxWidth` keep fields, buttons and lists within that range, and a text wraps at `maxWidth`. Nothing is drawn outside its place: a text, heading or button wider than its place ends in `...` and shows all of it as a tooltip; a text or heading with `overflow = \"wrap\"` breaks into lines instead (text only), `\"clip\"` is cut at the edge, `\"visible\"` keeps its own width. A window cannot be made narrower than its widgets need (their smallest sizes: a field 80 points, a button its padding and a few characters). Handlers get the widget as their last argument.",
+    "- Labels of fields (`input`, `number`, `slider`, `combo`, `radio`, `color`): `labelPosition` is `left` (the default: the labels of one column, section or window share a column and the fields line up after it, and a checkbox among them lines up with the fields), `above` or `right` (after the field). Set on a window, column, section, tab or split it is the default for the fields inside. When none is set and a column is too narrow for the labels beside the fields, the labels go above them instead. A field fills the rest of its line unless it has a `width`, so no label is cut off; a negative `height` makes a table, tree, canvas, scrolling column or tab, multi-line input or section fill the height that is left.",
     "- `row`, `column`: lay out their widgets side by side or one below the other; a row's `align` (`left`, `center`, `right`) moves its widgets to that side of the line. In a row, fields, bars, cards, lists and columns without a `width` share the free width equally (a negative `width` asks for a share too), the others get what their content needs, every widget stays inside its share, a `spacer` without a width takes a share too (so what follows it goes to the right), and `wrap = true` moves a widget that does not fit to the next line instead of narrowing the widgets. `gap` (points) sets the space between the widgets of a row, column, section or tab; a column or tab with `scroll = true` scrolls inside its `height` (200).",
     "- `grid`: places its widgets in `columns` (2) cells per row, row by row. The first column fits its content and the others share the rest, so `text` then a field per row lines labels up; a field without a `label` fills its cell.",
     "- `section`: a card with `title`, `icon`, `badge`; `collapsible` lets the user fold it, `open = false` starts it folded.",
@@ -8682,7 +8683,8 @@ local FORM_SKIP = {
   modal = { name = true, title = true, children = true },
   node = { kind = true, name = true, children = true, opens = true, closes = true, enabledWhen = true, record = true },
   -- the kinds a memory record can be bound to (record = "description" or id)
-  bindable = { checkbox = true, button = true, number = true, slider = true, input = true, text = true, combo = true, radio = true },
+)MLUA"),
+            std::string_view(R"MLUA(  bindable = { checkbox = true, button = true, number = true, slider = true, input = true, text = true, combo = true, radio = true },
 }
 
 -- ∑ enabledWhen: a widget of a form is enabled while another one says so,
@@ -8700,8 +8702,7 @@ local function formWhen(text)
   if not source then
     return nil, 'must name a widget, like "god", "not god" or "mode = Multiplier"'
   end
-)MLUA"),
-            std::string_view(R"MLUA(  local rule = { source = source, negate = negate ~= nil }
+  local rule = { source = source, negate = negate ~= nil }
   if rest ~= "" then
     local list = rest:match("^=%s*(.+)$")
     if not list or negate then
@@ -8973,7 +8974,8 @@ local function fillForm(path, made, members, children, resolve, folder, links)
     -- ∑ record = "God Mode": the widget shows the memory record and changes
     -- it, without code. A checkbox follows whether the record is on, a
     -- button switches it, the other kinds show and write its value. The
-    -- window refreshes them ten times a second while it is open; a widget
+)MLUA"),
+            std::string_view(R"MLUA(    -- window refreshes them ten times a second while it is open; a widget
     -- whose record is not in the table is disabled until it is.
     wiring.binds = wiring.binds or {}
     wiring.missing = wiring.missing or {}
@@ -8985,8 +8987,7 @@ local function fillForm(path, made, members, children, resolve, folder, links)
       if bind.kind == "number" or bind.kind == "slider" then
         local number = type(value) == "number" and value or tonumber(text)
         -- an integer widget shows 1.5 as 2: compared unrounded, it never matched and was set again and again
-)MLUA"),
-            std::string_view(R"MLUA(        if bind.integer and math.type(number) == "float" and number == number and number > -2 ^ 63 and number < 2 ^ 63 then
+        if bind.integer and math.type(number) == "float" and number == number and number > -2 ^ 63 and number < 2 ^ 63 then
           number = math.floor(number + 0.5)
         end
         return number
@@ -9275,7 +9276,8 @@ local function reloadForm(watch, start)
   local function windowUpdate(title, options)
     -- ∑ an option the file no longer sets goes back to its default: only
     -- sending the keys that are there kept the old value until the next run
-    local update = { title = title, icon = "", interval = 0, minWidth = 0, minHeight = 0, maxWidth = 0, maxHeight = 0,
+)MLUA"),
+            std::string_view(R"MLUA(    local update = { title = title, icon = "", interval = 0, minWidth = 0, minHeight = 0, maxWidth = 0, maxHeight = 0,
       resizable = true, autoSize = false, scrollbar = true, topmost = false }
     for key in pairs(WINDOW_UPDATE_KEYS) do
       if key ~= "title" and options[key] ~= nil then
@@ -9291,8 +9293,7 @@ local function reloadForm(watch, start)
     if entry then
       entry.onUpdate = options.onUpdate
       entry.onClose = options.onClose
-)MLUA"),
-            std::string_view(R"MLUA(      native.uiUpdate(handle.id, { updates = options.onUpdate ~= nil, handlers = options.onClose and UI_HANDLER_BITS.onClose or 0 })
+      native.uiUpdate(handle.id, { updates = options.onUpdate ~= nil, handlers = options.onClose and UI_HANDLER_BITS.onClose or 0 })
     end
   end
 
@@ -9494,7 +9495,8 @@ local function dialogObject(entry)
   })
 end
 
-native.docDefine(nil, "manifold.ui.dialog.Dialog", {
+)MLUA"),
+            std::string_view(R"MLUA(native.docDefine(nil, "manifold.ui.dialog.Dialog", {
   kind = "class",
   title = "Dialog objects",
   doc = "The dialog functions return at once; the dialog shows on top of the program and calls `onClose` with the answer when the user is done.",
@@ -9504,8 +9506,7 @@ native.docDefine(nil, "manifold.ui.dialog.Dialog.id", { kind = "field", type = "
 
 local dialog = subarea(ui, "dialog", "Dialogs on top of the program. They do not block the script: each takes `onClose`, which gets the answer, or nil when the user cancelled.")
 
-)MLUA"),
-            std::string_view(R"MLUA(local function openDialog(kind, props, onClose)
+local function openDialog(kind, props, onClose)
   local owner = ownerSource()
   local id = native.uiDialog(kind, owner, props)
   local entry = { id = id, kind = "dialog", owner = owner, children = {}, onDialog = onClose }
@@ -9765,7 +9766,8 @@ define(toolbar, "add", {
 end)
 
 local STATUS_KEYS = { icon = "string", tooltip = "string", color = "string", onClick = "function", text = "string" }
-local status = subarea(ui, "status", "Entries in the main window's status bar, after the administrator note.")
+)MLUA"),
+            std::string_view(R"MLUA(local status = subarea(ui, "status", "Entries in the main window's status bar, after the administrator note.")
 
 define(status, "add", {
   params = {
@@ -9783,8 +9785,7 @@ local image = subarea(ui, "image", "Pictures for `image` widgets and canvas draw
 define(image, "load", {
   params = { { name = "path", type = "string" } },
   returns = "image",
-)MLUA"),
-            std::string_view(R"MLUA(  doc = "Loads a PNG, JPEG, BMP, TGA or GIF file (a relative path starts at the program folder) and returns an image object with `width`, `height` and `remove()`, or nil and an `ME-7009` error.",
+  doc = "Loads a PNG, JPEG, BMP, TGA or GIF file (a relative path starts at the program folder) and returns an image object with `width`, `height` and `remove()`, or nil and an `ME-7009` error.",
 }, function(path)
   local owner = ownerSource()
   local id, width, height = native.uiImageLoad(path, owner)
@@ -10068,7 +10069,8 @@ local function moduleRequire(name, ...)
   if package.loaded[name] == nil then
     local other, loaded, declared, state = native.moduleLookup(name, key)
     if other then
-      if not loaded then
+)MLUA"),
+            std::string_view(R"MLUA(      if not loaded then
         error("module '" .. name .. "' is an autorun module that is not loaded (" .. state .. ")", 2)
       end
       if key and not declared and not moduleWarned[key .. "\0" .. other] then
@@ -10084,8 +10086,7 @@ end
 rawset(_G, "require", moduleRequire)
 pcall(native.docBind, moduleRequire, "require")
 
-)MLUA"),
-            std::string_view(R"MLUA(local moduleArea = area("module", "The autorun modules: the scripts in the `autorun` folder and the modules in `autorun\\modules`. A module is named by the `NAME` line of its header, or by its file or folder name. Extensions > Modules shows the same list. [AUTORUN.md](AUTORUN.md) describes the folder layout, the header and what `require` finds.")
+local moduleArea = area("module", "The autorun modules: the scripts in the `autorun` folder and the modules in `autorun\\modules`. A module is named by the `NAME` line of its header, or by its file or folder name. Extensions > Modules shows the same list. [AUTORUN.md](AUTORUN.md) describes the folder layout, the header and what `require` finds.")
 
 local MODULE_INFO = "a table with `name`, `version`, `author`, `description`, `category`, `kind` (`loose`, `file` or `folder`), `origin` (`shipped` or `user`), `state` (`loaded`, `disabled`, `failed`, `blocked`, `held`, `superseded`, `builtIn` or `pending`), `reason`, `enabled`, `changed`, `path` (the module's folder), `entry` (its entry file), `dataPath` (its folder under `autorun\\data`), `loadTime` in milliseconds and `requires` (a list of `{ name, version }`)"
 

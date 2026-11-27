@@ -311,6 +311,9 @@ namespace Manifold
             { ErrorCode::UnrealNoObject, "No Unreal object contains {}.",
                 "The address is not inside a live UObject: it is a struct on the heap, freed memory, or not Unreal data at all.",
                 "Use an address inside a live object, for example one from a dissect of the engine, the world or the pawn." },
+            { ErrorCode::UnrealIncomplete, "No reflected property {} among the properties read so far.",
+                "A property chain of the class or struct or one of its parents was not read to its end: it has more entries than one read takes, or a link in it is broken or leads back to an earlier entry.",
+                "Read further with manifold.unreal.fields(type, false, limit) and a higher limit, or look the property up in the Unreal Engine window." },
             { ErrorCode::RttiNoObject, "No object with run-time type information at or before {}.",
                 "No virtual function table pointer with MSVC run-time type information was found at the address or in the memory in front of it. "
                 "The program may be built without RTTI (Unreal Engine games are), with GCC, or the address is not inside a C++ object with virtual functions.",

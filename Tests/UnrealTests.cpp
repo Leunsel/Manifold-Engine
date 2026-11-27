@@ -544,6 +544,56 @@ namespace Manifold::Tests
             }
         }
 
+        // #8 follow-up: manifold.unreal.fields says whether the property chains were read to their end, and a higher
+        // node limit reads the property past kMaxFields.
+        void LuaFieldChains(Engine& engine)
+        {
+            UnrealSession& session = engine.Unreal();
+            const auto run = [&](const FakeUnreal::Variant& variant, const std::string& label, const std::string& code)
+                {
+                    FakeUnreal::Builder builder;
+                    CHECK_MSG(builder.Build(variant), label);
+                    const Fake fake = Widen(builder.Fake);
+                    session.Config().NamePool = fake.Pool;
+                    session.Config().Objects = fake.Objects;
+                    const Status status = session.ResolveNow();
+                    CHECK_MSG(status.Ok(), label + ": " + status.Text);
+                    std::string result;
+                    const Status lua = engine.Lua().RunWithResult(code, "unreal fields", result);
+                    CHECK_MSG(lua.Ok() && result == "ok", label + ": " + (lua.Ok() ? result : lua.Text));
+                };
+            for (const int count : { Target::UnrealRuntime::kMaxFields, Target::UnrealRuntime::kMaxFields + 1 })
+            {
+                run({ .BigClass = true, .BigFields = count }, "lua chain of " + std::to_string(count), Format(R"LUA(
+                    local unreal = manifold.unreal
+                    local count, limit = %d, %d
+                    local last = "Value_" .. (count - 1)
+                    local field, problem = unreal.field("BigActor", last)
+                    if count > limit then
+                      if field ~= nil or problem == nil or problem.code ~= "ME-4205" then return "field past the limit: " .. tostring(problem and problem.code) end
+                    elseif field == nil or field.name ~= last then return "field: " .. tostring(problem and problem.code) end
+                    local list, complete = unreal.fields("BigActor")
+                    if #list ~= limit or complete ~= (count <= limit) then return "fields: " .. #list .. ", complete " .. tostring(complete) end
+                    local more, done = unreal.fields("BigActor", false, count)
+                    if #more ~= count or done ~= true or more[#more].name ~= last then return "fields with a higher limit: " .. #more .. ", complete " .. tostring(done) end
+                    return "ok")LUA", count, Target::UnrealRuntime::kMaxFields));
+            }
+            run({ .BigClass = true, .BigFields = 3, .LoopChain = true }, "lua chain that links back", R"LUA(
+                local unreal = manifold.unreal
+                local list, complete = unreal.fields("BigActor", false, 65536)
+                if #list ~= 3 or complete ~= false then return "fields: " .. #list .. ", complete " .. tostring(complete) end
+                local field, problem = unreal.field("BigActor", "Missing")
+                if field ~= nil or problem == nil or problem.code ~= "ME-4205" then return "field: " .. tostring(problem and problem.code) end
+                return "ok")LUA");
+            const int ceiling = 16 * Target::UnrealRuntime::kMaxFields;
+            run({ .BigClass = true, .BigFields = ceiling + 1 }, "lua chain longer than the highest limit", Format(R"LUA(
+                local list, complete = manifold.unreal.fields("BigActor", false, math.maxinteger)
+                if #list ~= %d or complete ~= false then return "fields: " .. #list .. ", complete " .. tostring(complete) end
+                return "ok")LUA", ceiling));
+            session.Stop();
+            session.Config() = Target::UnrealConfig{};
+        }
+
         // #8: Functions() walks each class's child chain under the same node limit. A chain of exactly kMaxFields nodes is
         // complete and its last function is found; one node more is cut (CanContinue) and a higher limit finds it; a link
         // that is no pointer breaks the chain.
@@ -1091,6 +1141,7 @@ namespace Manifold::Tests
             }
         }
         BigChains(engine);
+        LuaFieldChains(engine);
         {
             FakeUnreal::Builder builder;
             CHECK(builder.Build({ .Containers = true }));

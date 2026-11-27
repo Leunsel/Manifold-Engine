@@ -482,8 +482,15 @@ namespace Manifold::Target
         }
         const std::string owner = NameOf(type).value_or("?");
         std::vector<std::uint8_t> block;
+        std::unordered_set<std::uint64_t> seen;
         while (chain.Next && chain.Nodes < maxNodes)
         {
+            if (!seen.insert(chain.Next).second)
+            {
+                chain.Next = 0;
+                chain.Broken = true;
+                break;
+            }
             const std::uint64_t field = chain.Next;
             ++chain.Nodes;
             const bool read = m_fieldBlock > 0 && ReadBlock(field, block, static_cast<std::size_t>(m_fieldBlock));

@@ -96,6 +96,8 @@ namespace FakeUnreal
         bool BigStruct = false;
         // The link after the middle property of the big chain is not a pointer: a chain that breaks.
         bool BrokenChain = false;
+        // The last property of the big chain links back to the first: a chain that never ends.
+        bool LoopChain = false;
         bool Containers = false;
     };
 
@@ -440,7 +442,7 @@ namespace FakeUnreal
                 const std::uintptr_t at = reinterpret_cast<std::uintptr_t>(m_bigFields) + static_cast<std::uintptr_t>(i) * kFieldStride;
                 Put<std::uintptr_t>(at, o.FieldClass, intClass);
                 Put<std::uintptr_t>(at, o.FieldOwner, owner);
-                Put<std::uintptr_t>(at, o.FieldNext, variant.BrokenChain && i == count / 2 ? std::uintptr_t(0x10) : next);
+                Put<std::uintptr_t>(at, o.FieldNext, variant.BrokenChain && i == count / 2 ? std::uintptr_t(0x10) : variant.LoopChain && i == count - 1 ? reinterpret_cast<std::uintptr_t>(m_bigFields) : next);
                 Put<std::uint32_t>(at, o.FieldName, value);
                 Put<std::uint32_t>(at, o.FieldName + 4, static_cast<std::uint32_t>(i + 1));
                 Put<std::int32_t>(at, o.FieldDim, 1);
