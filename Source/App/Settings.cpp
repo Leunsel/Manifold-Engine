@@ -384,6 +384,12 @@ namespace Manifold
             for (const auto& [name, keys] : Shortcuts)
                 out << "Key." << name << "=" << keys << "\n";
         }
+        if (!Rebases.empty())
+        {
+            open("Rebase");
+            for (const auto& [module, rule] : Rebases)
+                out << "Rebase." << module << "=" << rule << "\n";
+        }
 
         if (!Ini::WriteAtomic(path, out.str()))
             return Status::Fail(ErrorCode::SettingsNotSaved, WideToUtf8(path.wstring()));

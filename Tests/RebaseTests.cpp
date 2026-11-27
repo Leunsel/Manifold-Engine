@@ -11,6 +11,7 @@
 #include <windows.h>
 
 #include <cstdio>
+#include <filesystem>
 #include <string>
 
 namespace Manifold::Tests
@@ -43,6 +44,16 @@ namespace Manifold::Tests
             CHECK(!rebases.Rule("Game.exe") && rebases.Entries().size() == 1);
             const auto saved = rebases.Saved();
             CHECK(saved.size() == 1 && saved.count("engine.dll") == 1 && saved.at("engine.dll") == "0x180000000");
+
+            Settings written;
+            written.Rebases = { { "engine.dll", "0x180000000" }, { "Game.exe", "image" } };
+            const std::filesystem::path file = std::filesystem::temp_directory_path() / ("manifold-rebase-" + std::to_string(::GetCurrentProcessId()) + ".ini");
+            CHECK(written.Save(file).Ok());
+            Settings read;
+            CHECK(read.Load(file));
+            CHECK_MSG(read.Rebases == written.Rebases, "rules read back: " + std::to_string(read.Rebases.size()));
+            std::error_code ignored;
+            std::filesystem::remove(file, ignored);
         }
 
         void Live()
