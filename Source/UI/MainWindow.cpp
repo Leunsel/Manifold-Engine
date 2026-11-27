@@ -2417,8 +2417,11 @@ namespace Manifold::UI
         const std::vector<int> ids = m_engine.Table().Selection();
         if (ids.empty())
             return;
-        const auto remove = [this, ids]()
+        const std::uint64_t identity = m_engine.Table().Identity();
+        const auto remove = [this, ids, identity]()
             {
+                if (m_engine.Table().Identity() != identity)
+                    return;
                 // ∑ RemoveRecord switches off every script in the tree (not only the selected one) before it goes,
                 //   so no hook stays in the game; a record inside an already removed group is simply gone.
                 for (int id : ids)

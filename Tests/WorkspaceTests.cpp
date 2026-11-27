@@ -2,12 +2,15 @@
 
 #include "App/Engine.h"
 #include "App/Settings.h"
+#include "Core/Paths.h"
 #include "Layout/Layout.h"
 #include "UI/Workspace.h"
 
 #include "imgui.h"
 #include "imgui_internal.h"
 
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <string>
 
@@ -104,6 +107,26 @@ namespace Manifold::Tests
                     Frame([&] { workspace.Draw(); });
             }
 
+            // A key pressed and let go; with a name, first the window whose name contains it gets the focus.
+            void Key(Workspace& workspace, ImGuiKey key, const std::string& window = {})
+            {
+                if (!window.empty())
+                {
+                    Frame([&] {
+                        for (ImGuiWindow* candidate : ImGui::GetCurrentContext()->Windows)
+                        {
+                            if (std::string(candidate->Name).find(window) != std::string::npos)
+                                ImGui::FocusWindow(candidate);
+                        }
+                        workspace.Draw();
+                    });
+                }
+                ImGui::GetIO().AddKeyEvent(key, true);
+                Frame([&] { workspace.Draw(); });
+                ImGui::GetIO().AddKeyEvent(key, false);
+                Frame([&] { workspace.Draw(); });
+            }
+
             // A key chord pressed and let go while the window whose name ends in windowId has the focus.
             void Press(Workspace& workspace, const std::string& windowId, ImGuiKey key, ImGuiKeyChord mods)
             {
@@ -148,10 +171,64 @@ namespace Manifold::Tests
             CHECK_EQ(shell.Closes, 0);
         }
 
+        std::filesystem::path TestFolder()
+        {
+            const std::filesystem::path folder = Paths::DataFolder() / L"workspace";
+            std::error_code ignored;
+            std::filesystem::create_directories(folder, ignored);
+            return folder;
+        }
+
+        std::filesystem::path WriteGroups(const char* name, const char* tag)
+        {
+            const std::filesystem::path path = TestFolder() / name;
+            std::ofstream file(path, std::ios::binary);
+            file << "<CheatTable><CheatEntries>";
+            for (const int id : { 1, 2, 5 })
+                file << "<CheatEntry><ID>" << id << "</ID><Description>\"" << tag << " " << id << "\"</Description><GroupHeader>1</GroupHeader></CheatEntry>";
+            file << "</CheatEntries></CheatTable>";
+            return path;
+        }
+
+        // U3: Delete Records asks first; a table dropped while the question is open replaces the table, and answering Delete
+        // must not delete the records of the same IDs in the new table.
+        void DeleteConfirmAfterDrop()
+        {
+            const std::filesystem::path a = WriteGroups("delete-a.CT", "a");
+            const std::filesystem::path b = WriteGroups("delete-b.CT", "b");
+            Settings settings;
+            Engine engine(settings);
+            UiFrames frames;
+            FakeShell shell;
+            Workspace workspace(engine, shell);
+            CHECK(engine.LoadTable(a, false).Ok());
+            frames.Frames(workspace, 3);
+            engine.Table().Select(1, false);
+            engine.Table().Select(2, true);
+            engine.Table().Select(5, true);
+            frames.Key(workspace, ImGuiKey_Delete, "##addresslist");
+            frames.Frames(workspace, 2);
+            bool asked = false;
+            for (const ImGuiWindow* window : ImGui::GetCurrentContext()->Windows)
+                asked = asked || (window->Active && std::string(window->Name).find("Delete Records") != std::string::npos);
+            CHECK_MSG(asked, "Delete Records did not ask");
+            workspace.DropFiles({ b }, false);
+            frames.Frames(workspace, 3);
+            const Table::MemoryRecord* before = engine.Table().FindById(5);
+            CHECK_MSG(before && before->Description.find("b 5") != std::string::npos, "the dropped table did not load");
+            frames.Key(workspace, ImGuiKey_Enter);
+            frames.Frames(workspace, 2);
+            std::string left;
+            for (const int id : { 1, 2, 5 })
+                left += engine.Table().FindById(id) ? std::to_string(id) + " " : "";
+            CHECK_MSG(left == "1 2 5 ", "records of the dropped table left after answering Delete: " + (left.empty() ? std::string("none") : left));
+        }
+
         int RunWorkspaceTests()
         {
             const int before = Totals().Failures;
             Smoke();
+            DeleteConfirmAfterDrop();
             return Totals().Failures - before;
         }
     }
