@@ -33,6 +33,7 @@ namespace Manifold::UI
         Workspace& m_workspace;
         Engine& m_engine;
         int m_recordId = 0;
+        std::uint64_t m_tableIdentity = 0;
         std::string m_title;
         std::string m_description;
         std::string m_address;

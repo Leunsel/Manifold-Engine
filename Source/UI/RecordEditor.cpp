@@ -184,6 +184,7 @@ namespace Manifold::UI
 
     RecordEditor::RecordEditor(Workspace& workspace, int recordId, RecordField field) : m_workspace(workspace), m_engine(workspace.Core()), m_recordId(recordId)
     {
+        m_tableIdentity = m_engine.Table().Identity();
         if (const Table::MemoryRecord* record = m_engine.Table().FindById(recordId))
             Load(*record);
         m_title = ICON_FA_SLIDERS_H "  " + m_description + "###record" + std::to_string(recordId);
@@ -647,7 +648,7 @@ namespace Manifold::UI
         if (!m_open)
             return;
         Table::MemoryRecord* record = m_engine.Table().FindById(m_recordId);
-        if (!record)
+        if (!record || m_engine.Table().Identity() != m_tableIdentity)
         {
             m_open = false;
             return;

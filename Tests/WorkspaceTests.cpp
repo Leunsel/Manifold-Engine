@@ -347,6 +347,40 @@ namespace Manifold::Tests
             CHECK_MSG(!ShowsSaveError(), "Save of a script added to the current table was refused");
         }
 
+        bool ShowsWindow(const std::string& part)
+        {
+            for (const ImGuiWindow* window : ImGui::GetCurrentContext()->Windows)
+            {
+                if (window->Active && std::string(window->Name).find(part) != std::string::npos)
+                    return true;
+            }
+            return false;
+        }
+
+        // The record editor opened on record 3 of one table, then another table loaded: Apply must not write into record 3 of
+        // the new table.
+        void RecordEditorAfterTableReplaced()
+        {
+            Settings settings;
+            Engine engine(settings);
+            UiFrames frames;
+            FakeShell shell;
+            Workspace workspace(engine, shell);
+            CHECK(engine.LoadTable(WriteGroups("editor-a.CT", "a"), false).Ok());
+            workspace.OpenRecordEditor(5);
+            frames.Frames(workspace, 5);
+            CHECK_MSG(ShowsWindow("###record5"), "no record editor");
+            CHECK(engine.LoadTable(WriteGroups("editor-b.CT", "b"), false).Ok());
+            frames.Frames(workspace, 2);
+            frames.Activate(workspace, "###record5", "Apply");
+            const Table::MemoryRecord* record = engine.Table().FindById(5);
+            CHECK_MSG(record && record->Description.find("b 5") != std::string::npos,
+                "record 5 of table b after Apply in the editor opened for table a: " + (record ? record->Description : std::string("missing")));
+            workspace.OpenRecordEditor(5);
+            frames.Frames(workspace, 3);
+            CHECK_MSG(ShowsWindow("###record5"), "opening record 5 of table b showed no record editor");
+        }
+
         int RunWorkspaceTests()
         {
             const int before = Totals().Failures;
@@ -354,6 +388,7 @@ namespace Manifold::Tests
             DeleteConfirmAfterDrop();
             EditorAfterTableReplaced();
             AddToTableAfterNewTable();
+            RecordEditorAfterTableReplaced();
             return Totals().Failures - before;
         }
     }
