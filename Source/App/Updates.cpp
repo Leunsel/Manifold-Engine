@@ -593,6 +593,8 @@ namespace Manifold::Updates
             }
             dropStaged();
             std::vector<std::string> leftovers;
+            for (const std::filesystem::path& path : ReadLeftovers(folder))
+                leftovers.push_back(Relative(folder, path));
             for (const Step& step : steps)
             {
                 if (!step.Old.empty())
