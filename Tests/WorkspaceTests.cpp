@@ -3,6 +3,7 @@
 #include "App/Engine.h"
 #include "App/Settings.h"
 #include "Core/Paths.h"
+#include "Core/Text.h"
 #include "Layout/Layout.h"
 #include "UI/Workspace.h"
 
@@ -224,11 +225,72 @@ namespace Manifold::Tests
             CHECK_MSG(left == "1 2 5 ", "records of the dropped table left after answering Delete: " + (left.empty() ? std::string("none") : left));
         }
 
+        std::filesystem::path WriteTable(const std::filesystem::path& folder, const char* name, const std::string& script)
+        {
+            const std::filesystem::path path = folder / name;
+            std::ofstream(path, std::ios::binary) << "<CheatTable><CheatEntries><CheatEntry><ID>3</ID><Description>\"Script\"</Description>"
+                "<VariableType>Auto Assembler Script</VariableType><AssemblerScript>" << script << "</AssemblerScript></CheatEntry></CheatEntries></CheatTable>";
+            return path;
+        }
+
+        std::string ScriptWindowId()
+        {
+            for (const ImGuiWindow* window : ImGui::GetCurrentContext()->Windows)
+            {
+                const std::string name = window->Name;
+                if (const std::size_t at = name.find("###script"); at != std::string::npos && name.find('/') == std::string::npos)
+                    return name.substr(at);
+            }
+            return {};
+        }
+
+        // U1: a script editor opened on a record of one table, then another table loaded: Save must not write the first table's
+        // script into the record of the same ID in the second.
+        void EditorAfterTableReplaced()
+        {
+            const std::filesystem::path folder = TestFolder();
+            const std::filesystem::path a = WriteTable(folder, "a.CT", "[ENABLE]\n// table a\n[DISABLE]\n");
+            const std::filesystem::path b = WriteTable(folder, "b.CT", "[ENABLE]\n// table b\n[DISABLE]\n");
+            Settings settings;
+            Engine engine(settings);
+            UiFrames frames;
+            FakeShell shell;
+            Workspace workspace(engine, shell);
+            CHECK(engine.LoadTable(a, false).Ok());
+            const Table::MemoryRecord* record = engine.Table().FindById(3);
+            CHECK(record != nullptr);
+            if (!record)
+                return;
+            workspace.OpenScript(record->Script, 3);
+            frames.Frames(workspace, 5);
+            const std::string window = ScriptWindowId();
+            CHECK_MSG(!window.empty(), "no script window");
+            CHECK(engine.LoadTable(b, false).Ok());
+            frames.Frames(workspace, 2);
+            frames.Press(workspace, window, ImGuiKey_S, ImGuiMod_Ctrl);
+            const Table::MemoryRecord* other = engine.Table().FindById(3);
+            CHECK_MSG(other && other->Script.find("table b") != std::string::npos,
+                "table b's record 3 after Save in the editor opened for table a: " + (other ? ReplaceAll(other->Script, "\n", " | ") : std::string("missing")));
+            if (other)
+                workspace.OpenScript(other->Script, 3);
+            frames.Frames(workspace, 3);
+            int editors = 0;
+            for (const ImGuiWindow* candidate : ImGui::GetCurrentContext()->Windows)
+            {
+                const std::string name = candidate->Name;
+                const std::size_t at = name.find("###script");
+                editors += candidate->Active && at != std::string::npos && name.size() > at + 9 &&
+                    name.find_first_not_of("0123456789", at + 9) == std::string::npos;
+            }
+            CHECK_MSG(editors == 2, "opening record 3 of table b gave " + std::to_string(editors) + " script editors: the one of table a came back instead of a new one");
+        }
+
         int RunWorkspaceTests()
         {
             const int before = Totals().Failures;
             Smoke();
             DeleteConfirmAfterDrop();
+            EditorAfterTableReplaced();
             return Totals().Failures - before;
         }
     }

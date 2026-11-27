@@ -119,6 +119,7 @@ namespace Manifold::UI
         : m_workspace(workspace), m_engine(workspace.Core()), m_text(std::move(script)), m_recordId(recordId), m_lua(lua), m_templates(workspace)
     {
         m_saved = m_text;
+        m_tableIdentity = m_engine.Table().Identity();
         std::string name;
         if (recordId == kTableLuaScript)
             name = "Table Lua Script";
@@ -259,6 +260,12 @@ namespace Manifold::UI
     void ScriptWindow::SaveToRecord()
     {
         m_shownError.clear();
+        if (m_engine.Table().Identity() != m_tableIdentity)
+        {
+            m_resultOk = false;
+            m_result = "Not saved: another table was opened since this script was. The text stays here.";
+            return;
+        }
         if (m_recordId == kTableLuaScript)
         {
             m_engine.Table().TableLuaScript = m_text;

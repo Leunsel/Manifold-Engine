@@ -20,6 +20,7 @@ namespace Manifold::UI
         ScriptWindow(Workspace& workspace, int number, std::string script, int recordId, bool lua);
         void Draw() override;
         int RecordId() const { return m_recordId; }
+        std::uint64_t TableIdentity() const { return m_tableIdentity; }
         void Focus() { m_bringToFront = true; }
         const std::string& WindowId() const { return m_windowId; }
         bool Placed() const { return m_placed; }
@@ -55,6 +56,7 @@ namespace Manifold::UI
         std::string m_fileText;
         std::filesystem::path m_path;
         int m_recordId = 0;
+        std::uint64_t m_tableIdentity = 0;
         bool m_lua = false;
         CodeEditorState m_editor;
         CodeAssist m_luaAssist;

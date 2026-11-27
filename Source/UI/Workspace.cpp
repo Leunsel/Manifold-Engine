@@ -652,7 +652,7 @@ namespace Manifold::UI
         {
             for (auto& window : m_scripts)
             {
-                if (window->RecordId() == recordId)
+                if (window->RecordId() == recordId && window->TableIdentity() == m_engine.Table().Identity())
                 {
                     window->Focus();
                     return;
