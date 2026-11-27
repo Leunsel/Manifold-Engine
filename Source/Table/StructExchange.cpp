@@ -810,7 +810,7 @@ namespace Manifold::Table
                         numbers.push_back(m_tokens[i].Value);
                 }
                 if (text.find("FieldOffset") != std::string::npos && !numbers.empty())
-                    m_fieldOffset = static_cast<int>(numbers.front());
+                    m_fieldOffset = static_cast<int>(std::min<std::uint64_t>(numbers.front(), kMaxFieldOffset));
                 if (text.find("StructLayout") != std::string::npos)
                 {
                     m_explicit = text.find("Explicit") != std::string::npos;
@@ -819,7 +819,7 @@ namespace Manifold::Table
                     for (std::size_t i = start; i + 2 < m_at; ++i)
                     {
                         if (m_tokens[i].Text == "Size" && m_tokens[i + 1].Text == "=" && m_tokens[i + 2].Kind == TokenKind::Number)
-                            m_layoutSize = static_cast<int>(m_tokens[i + 2].Value);
+                            m_layoutSize = static_cast<int>(std::min<std::uint64_t>(m_tokens[i + 2].Value, kMaxFieldOffset));
                         if (m_tokens[i].Text == "Pack" && m_tokens[i + 1].Text == "=" && m_tokens[i + 2].Kind == TokenKind::Number)
                             m_layoutPack = static_cast<int>(m_tokens[i + 2].Value);
                     }
@@ -1163,14 +1163,14 @@ namespace Manifold::Table
                 {
                     int dimension = 0;
                     if (Peek().Kind == TokenKind::Number)
-                        dimension = static_cast<int>(Next().Value);
+                        dimension = static_cast<int>(std::min<std::uint64_t>(Next().Value, kMaxFieldOffset));
                     else
                         Warn(line, "the length of " + result.Name + " is not a number");
                     while (!AtEnd() && !Is("]") && !Is(")"))
                         Next();
                     if (!Accept("]"))
                         return fail();
-                    result.Count = result.Count ? result.Count * dimension : dimension;
+                    result.Count = static_cast<int>(std::min<std::int64_t>(result.Count ? static_cast<std::int64_t>(result.Count) * dimension : dimension, kMaxFieldOffset));
                 }
                 if (!Accept(")"))
                     return fail();
@@ -1349,6 +1349,15 @@ namespace Manifold::Table
                     else
                     {
                         at = layout.Union ? 0 : AlignUp(layout.Offset, align);
+                        if (at >= kMaxFieldOffset)
+                        {
+                            layout.UnitOffset = -1;
+                            if (!layout.Union)
+                                layout.Offset = kMaxFieldOffset;
+                            if (!name.empty())
+                                Warn(line, Format("%s lies beyond the largest offset a dissect field can have (%X); it is left out", name.c_str(), kMaxFieldOffset));
+                            return;
+                        }
                         layout.UnitOffset = at;
                         layout.UnitSize = unit;
                         layout.UnitBits = 0;
@@ -1379,7 +1388,14 @@ namespace Manifold::Table
                 else
                     at = layout.Union ? 0 : AlignUp(layout.Offset, align);
                 m_fieldOffset.reset();
-                const int total = type.Size * std::max(count, 1);
+                if (at >= kMaxFieldOffset)
+                {
+                    if (!layout.Union)
+                        layout.Offset = kMaxFieldOffset;
+                    Warn(line, Format("%s lies beyond the largest offset a dissect field can have (%X); it is left out", name.c_str(), kMaxFieldOffset));
+                    return;
+                }
+                const int total = static_cast<int>(std::min<std::int64_t>(static_cast<std::int64_t>(type.Size) * std::max(count, 1), kMaxFieldOffset - at));
                 Emit(parsed, type, name, at, count, line);
                 if (!layout.Union)
                     layout.Offset = std::max(layout.Offset, at + total);
@@ -1434,12 +1450,24 @@ namespace Manifold::Table
                     {
                         const int base = at + i * type.Size;
                         const std::string element = count > 0 ? Format("%s[%d]", name.c_str(), i) : name;
+                        if (base >= kMaxFieldOffset)
+                        {
+                            Warn(line, Format("%s lies beyond the largest offset a dissect field can have (%X); it is left out", element.c_str(), kMaxFieldOffset));
+                            break;
+                        }
                         if (type.Kind == Basic::MemberFunction)
                             plain(TypeInfo{ Basic::Pointer, m_pointer, m_pointer, false, {} }, base, element);
                         else
                             plain(TypeInfo{ Basic::Integer, 4, 4, true, {} }, base, element);
                         for (std::size_t part = 0; part < parts.size(); ++part)
+                        {
+                            if (base + head + 4 * static_cast<int>(part) >= kMaxFieldOffset)
+                            {
+                                Warn(line, Format("%s_%s lies beyond the largest offset a dissect field can have (%X); it is left out", element.c_str(), parts[part].c_str(), kMaxFieldOffset));
+                                break;
+                            }
                             plain(TypeInfo{ Basic::Integer, 4, 4, true, {} }, base + head + 4 * static_cast<int>(part), element + "_" + parts[part]);
+                        }
                     }
                     if (type.Model == InheritanceModel::Unknown)
                         Warn(line, Format("%s: %s is not defined before it, so the pointer to member takes MSVC's general form (%d bytes); "
@@ -1458,9 +1486,9 @@ namespace Manifold::Table
                     field.Name = name;
                     field.Type = Scan::ValueType::String;
                     field.Unicode = type.Kind == Basic::Char16;
-                    field.Size = std::clamp(type.Size * count, 1, kMaxFieldBytes);
+                    field.Size = static_cast<int>(std::clamp<std::int64_t>(static_cast<std::int64_t>(type.Size) * count, 1, kMaxFieldBytes));
                     parsed.Definition.Fields.push_back(field);
-                    if (type.Size * count > kMaxFieldBytes)
+                    if (static_cast<std::int64_t>(type.Size) * count > kMaxFieldBytes)
                         Warn(line, Format("%s is longer than a dissect field can be (%d bytes)", name.c_str(), kMaxFieldBytes));
                     return;
                 }
@@ -1477,16 +1505,23 @@ namespace Manifold::Table
                 if (count <= kExpand && !(type.Kind == Basic::Integer && type.Size == 1))
                 {
                     for (int i = 0; i < count; ++i)
+                    {
+                        if (at + static_cast<std::int64_t>(i) * type.Size >= kMaxFieldOffset)
+                        {
+                            Warn(line, Format("%s[%d] lies beyond the largest offset a dissect field can have (%X); it is left out", name.c_str(), i, kMaxFieldOffset));
+                            return;
+                        }
                         plain(type, at + i * type.Size, Format("%s[%d]", name.c_str(), i));
+                    }
                     return;
                 }
                 StructField field;
                 field.Offset = at;
                 field.Name = name;
                 field.Type = Scan::ValueType::ByteArray;
-                field.Size = std::clamp(type.Size * count, 1, kMaxFieldBytes);
+                field.Size = static_cast<int>(std::clamp<std::int64_t>(static_cast<std::int64_t>(type.Size) * count, 1, kMaxFieldBytes));
                 parsed.Definition.Fields.push_back(field);
-                if (type.Size * count > kMaxFieldBytes)
+                if (static_cast<std::int64_t>(type.Size) * count > kMaxFieldBytes)
                     Warn(line, Format("%s (%d elements) is longer than a dissect field can be; it is cut to %d bytes", name.c_str(), count, kMaxFieldBytes));
             }
 
@@ -1614,13 +1649,13 @@ namespace Manifold::Table
                         {
                             int dimension = 0;
                             if (Peek().Kind == TokenKind::Number)
-                                dimension = static_cast<int>(Next().Value);
+                                dimension = static_cast<int>(std::min<std::uint64_t>(Next().Value, kMaxFieldOffset));
                             else
                                 Warn(line, "the length of " + name + " is not a number");
                             while (!AtEnd() && !Is("]"))
                                 Next();
                             Accept("]");
-                            count = count ? count * dimension : dimension;
+                            count = static_cast<int>(std::min<std::int64_t>(count ? static_cast<std::int64_t>(count) * dimension : dimension, kMaxFieldOffset));
                         }
                     }
                     int bits = 0;
@@ -1712,10 +1747,15 @@ namespace Manifold::Table
                             for (StructField field : nested.Definition.Fields)
                             {
                                 field.Offset += at;
+                                if (field.Offset >= kMaxFieldOffset)
+                                {
+                                    Warn(Peek().Line, Format("%s lies beyond the largest offset a dissect field can have (%X); it is left out", field.Name.c_str(), kMaxFieldOffset));
+                                    continue;
+                                }
                                 parsed.Definition.Fields.push_back(field);
                             }
                             if (!layout.Union)
-                                layout.Offset = at + nested.Size;
+                                layout.Offset = std::min(at + nested.Size, kMaxFieldOffset);
                             layout.UnionSize = std::max(layout.UnionSize, at + nested.Size);
                             layout.Align = std::max(layout.Align, align);
                             Accept(";");
@@ -1742,7 +1782,10 @@ namespace Manifold::Table
                                 while (Accept("["))
                                 {
                                     if (Peek().Kind == TokenKind::Number)
-                                        count = count ? count * static_cast<int>(Next().Value) : static_cast<int>(Next().Value);
+                                    {
+                                        const std::int64_t dimension = std::min<std::uint64_t>(Next().Value, kMaxFieldOffset);
+                                        count = static_cast<int>(std::min<std::int64_t>(count ? count * dimension : dimension, kMaxFieldOffset));
+                                    }
                                     while (!AtEnd() && !Is("]"))
                                         Next();
                                     Accept("]");
@@ -1774,13 +1817,20 @@ namespace Manifold::Table
                 {
                     for (StructField& field : parsed.Definition.Fields)
                         field.Offset += m_pointer;
+                    std::erase_if(parsed.Definition.Fields, [&](const StructField& field)
+                        {
+                            if (field.Offset < kMaxFieldOffset)
+                                return false;
+                            Warn(Peek().Line, Format("%s lies beyond the largest offset a dissect field can have (%X); it is left out", field.Name.c_str(), kMaxFieldOffset));
+                            return true;
+                        });
                     StructField table;
                     table.Name = "vftable";
                     table.Type = Scan::ValueType::Pointer;
                     table.Size = m_pointer;
                     table.Display = FieldDisplay::Hex;
                     parsed.Definition.Fields.insert(parsed.Definition.Fields.begin(), table);
-                    layout.Offset += m_pointer;
+                    layout.Offset = std::min(layout.Offset + m_pointer, kMaxFieldOffset);
                     layout.UnionSize += m_pointer;
                     layout.Align = std::max(layout.Align, std::min(m_pointer, layout.Pack));
                 }

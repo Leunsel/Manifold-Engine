@@ -247,6 +247,93 @@ namespace Manifold::Tests
             CHECK(ImportStructures("int x; void f();", {}).Error().Code == ErrorCode::StructNotFound);
         }
 
+        void CheckHugeArrays()
+        {
+            static constexpr std::string_view kTexts[] = {
+                "struct S { int a[1000000000]; int b; };",
+                "struct S { char a[0x20000000]; int b; };",
+                "struct S { int a[65536][65537]; int b; };",
+                "struct S { int a[0x100000001]; int b; };",
+                "struct S { struct Inner { int x; } a[65536][65537]; int b; };",
+                "struct S { void (*a[65536][65537])(); int b; };",
+                "struct S { int a[99999999999999999999]; int b; };",
+                "struct S { int a[3][0x8000000000000001]; int b; };",
+                "struct S { struct Inner { int x; } a[99999999999999999999]; int b; };",
+                "struct S { void (*a[99999999999999999999])(); int b; };",
+            };
+            for (const std::string_view text : kTexts)
+            {
+                const StructImport imported = Import(text);
+                const StructDefinition* s = Named(imported.Structures, "S");
+                bool inside = s != nullptr;
+                const StructField* b = nullptr;
+                for (const StructField& field : s ? s->Fields : std::vector<StructField>())
+                {
+                    inside = inside && field.Offset >= 0 && field.Offset + field.Size <= kMaxFieldOffset;
+                    if (field.Name == "b")
+                        b = &field;
+                }
+                bool warned = false;
+                bool cut = false;
+                for (const std::string& warning : imported.Warnings)
+                {
+                    warned = warned || warning.find("b lies beyond") != std::string::npos;
+                    cut = cut || warning.find(": a ") != std::string::npos;
+                }
+                CHECK_MSG(inside && !b && warned, std::string(text) + " -> " + Offsets(s));
+                CHECK_MSG(At(s, 0, "a") && At(s, 0, "a")->Size == kMaxFieldBytes && cut, std::string(text) + " -> " + Offsets(s));
+            }
+        }
+
+        void CheckFieldsPastOffsetLimit()
+        {
+            struct Case
+            {
+                std::string_view Text;
+                int LastOffset;
+                std::string_view Last;
+                std::string_view Beyond;
+            };
+            static constexpr Case kCases[] = {
+                { "struct S { char p[0xFFFFFF0]; int a[64]; };", 0xFFFFFFC, "a[3]", "a[4] lies beyond" },
+                { "struct Inner { char x[0x8000000]; }; struct S { Inner a[20]; int b; };", 0x8000000, "a[1]", "a[2] lies beyond" },
+                { "struct C { int x; }; struct S { char p[0xFFFFFF0]; void (C::*a[8])(); };", 0xFFFFFF8, "a[1]", "a[2] lies beyond" },
+                { "struct Fwd; struct S { char p[0xFFFFFF8]; void (Fwd::*m)(); };", 0xFFFFFF8, "m", "m_thisAdjust lies beyond" },
+                { "struct S { char p[0xFFFFFFC]; int a : 3; int b : 3; char c : 1; };", 0xFFFFFFC, "b", "c lies beyond" },
+                { "struct S { char p[0xFFFFFFC]; int a : 3; int b : 3; char c : 1; int d : 3; };", 0xFFFFFFC, "b", "d lies beyond" },
+                { "struct S { char a[0x20000000]; int b : 3; };", 0, "a", "b lies beyond" },
+                { "struct S { char p[0xFFFFFFD]; int a : 3; char b : 1; };", 0, "p", "b lies beyond" },
+                { "struct S { char p[0xFFFFFFD]; int a; char b; };", 0, "p", "b lies beyond" },
+                { "struct S { char p[0xFFFFFF0]; struct { int x[8]; int y; }; };", 0xFFFFFFC, "x[3]", "x[4] lies beyond" },
+                { "[StructLayout(LayoutKind.Explicit)] public struct S { [FieldOffset(0x8)] public int k; [FieldOffset(0xFFFFFFFF)] public int a; };", 8, "k", "a lies beyond" },
+                { "[StructLayout(LayoutKind.Explicit)] public struct S { [FieldOffset(0x8)] public int k; [FieldOffset(0x100000004)] public int a; };", 8, "k", "a lies beyond" },
+                { "[StructLayout(LayoutKind.Explicit)] public struct S { [FieldOffset(0x8)] public int k; [FieldOffset(0x80000000)] public int a; public int b; };", 8, "k", "a lies beyond" },
+                { "[StructLayout(LayoutKind.Sequential, Size = 0x20000000)] public struct S { public int k; };", 0, "k", "" },
+                { "struct S { virtual void f(); char p[0xFFFFFF0]; int a[4]; };", 0xFFFFFFC, "a[1]", "a[2] lies beyond" },
+            };
+            for (const Case& test : kCases)
+            {
+                const StructImport imported = Import(test.Text);
+                const StructDefinition* s = Named(imported.Structures, "S");
+                bool inside = s != nullptr;
+                for (const StructField& field : s ? s->Fields : std::vector<StructField>())
+                    inside = inside && field.Offset >= 0 && field.Offset < kMaxFieldOffset;
+                bool warned = test.Beyond.empty();
+                for (const std::string& warning : imported.Warnings)
+                    warned = warned || warning.find(test.Beyond) != std::string::npos;
+                CHECK_MSG(inside && warned && At(s, test.LastOffset, test.Last), std::string(test.Text) + " -> " + Offsets(s));
+            }
+
+            const StructImport unnamed = Import("struct S { char a[0x20000000]; int : 3; };");
+            const StructDefinition* s = Named(unnamed.Structures, "S");
+            bool beyond = false;
+            for (const std::string& warning : unnamed.Warnings)
+                beyond = beyond || warning.find("lies beyond") != std::string::npos;
+            for (const StructField& field : s ? s->Fields : std::vector<StructField>())
+                beyond = beyond || field.Name.empty();
+            CHECK_MSG(At(s, 0, "a") && !beyond, unnamed.Warnings.empty() ? Offsets(s) : unnamed.Warnings.back() + " " + Offsets(s));
+        }
+
         // #11: function pointers and pointers to members. The expected numbers are
         // offsetof/sizeof from cl 19.4x (VS 2022) on the same text, x64 then x86.
         void CheckFunctionPointers()
@@ -469,6 +556,8 @@ namespace Manifold::Tests
             CheckRoundTripCpp();
             CheckMsvcLayout();
             CheckFunctionPointers();
+            CheckHugeArrays();
+            CheckFieldsPastOffsetLimit();
             CheckCSharp();
             CheckReClass();
             CheckMerge();

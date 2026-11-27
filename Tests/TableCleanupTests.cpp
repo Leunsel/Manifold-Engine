@@ -54,6 +54,10 @@ namespace Manifold::Tests
             const std::string spanned = StripAutoAssemblerComments("mov eax,1 { one\ntwo } mov ebx,2\n");
             CHECK_MSG(spanned == "mov eax,1\nmov ebx,2\n", spanned);
             CHECK_EQ(StripAutoAssemblerComments("{ only\na comment }\nnop\n"), std::string("nop\n"));
+            const std::string slashed = StripAutoAssemblerComments("/* see https://example.com */\n[ENABLE]\nnop\n[DISABLE]\n");
+            CHECK_MSG(slashed == "[ENABLE]\nnop\n[DISABLE]\n", slashed);
+            const std::string slashedLines = StripAutoAssemblerComments("mov eax,1 /* one\ntwo // three */ mov ebx,2\n");
+            CHECK_MSG(slashedLines == "mov eax,1\nmov ebx,2\n", slashedLines);
         }
 
         std::string SampleTable()

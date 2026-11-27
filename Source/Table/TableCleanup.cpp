@@ -336,9 +336,10 @@ namespace Manifold::Table
                 out += kRemoved;
                 continue;
             }
-            if (c == '{')
+            const bool slashBlock = c == '/' && at + 1 < script.size() && script[at + 1] == '*';
+            if (c == '{' || slashBlock)
             {
-                const std::size_t close = script.find('}', at + 1);
+                const std::size_t close = slashBlock ? script.find("*/", at + 2) : script.find('}', at + 1);
                 if (at + 1 < script.size() && script[at + 1] == '$')
                 {
                     const std::size_t end = close == std::string_view::npos ? script.size() : close + 1;
@@ -358,7 +359,7 @@ namespace Manifold::Table
                 // a block comment keeps its line breaks out, so the lines it spanned close up; one line break
                 // stays when it spanned lines, or code before it and code after it would end up on one line
                 const bool spans = script.substr(at, close - at).find('\n') != std::string_view::npos;
-                at = close + 1;
+                at = close + (slashBlock ? 2 : 1);
                 out += kRemoved;
                 if (spans)
                 {
