@@ -46,6 +46,15 @@ namespace Manifold::Tests
             local mixed = executeCodeEx(1, nil, module .. '.MixedCall', 1, { type = 2, value = 2.5 }, { type = 1, value = 1.5 }, 4, 5, { type = 2, value = 0.25 })
             if mixed ~= 1 + 2 + 3 + 40 + 500 + 250 then return 'mixed parameters ' .. tostring(mixed) end
             if pcall(executeCodeEx, 0, nil, 0) then return 'address 0 accepted' end
+            local answerStub = allocateMemory(0x100)
+            if not autoAssemble(string.format('%X:\nmov eax,2A\n%s', answerStub, wide and 'ret' or 'ret 4')) then return 'the answer stub did not assemble' end
+            local answered = executeCode(answerStub, 0)
+            if answered ~= 42 then return 'executeCode gave ' .. tostring(answered) end
+            local slowStub = allocateMemory(0x100)
+            local slow = wide and 'sub rsp,28\nmov ecx,#1000\nmov rax,kernel32.Sleep\ncall rax\nadd rsp,28\nret' or 'push #1000\nmov eax,kernel32.Sleep\ncall eax\nret 4'
+            if not autoAssemble(string.format('%X:\n%s', slowStub, slow)) then return 'the slow stub did not assemble' end
+            local timedOut, late = executeCode(slowStub, 0, 100)
+            if timedOut ~= nil or not late then return 'executeCode ignored its timeout: ' .. tostring(timedOut) end
 
             local probe = readPointer(module .. '.g_callProbe')
             local add = readPointer(readPointer(probe))

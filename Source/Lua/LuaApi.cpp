@@ -10,6 +10,7 @@
 #include "Lua/LuaArgs.h"
 #include "Lua/LuaEngine.h"
 #include "Scan/Scanner.h"
+#include "Target/CodeCall.h"
 
 #include "lua.hpp"
 
@@ -531,8 +532,24 @@ namespace Manifold::Lua
             const auto process = NeedProcess(state);
             const std::uint64_t address = AddressArgument(state, 1);
             const std::uint64_t parameter = lua_isnoneornil(state, 2) ? 0 : AddressArgument(state, 2);
-            const Status status = process->CreateThread(address, parameter, true);
-            lua_pushboolean(state, status.Ok());
+            Target::CodeCallRequest request;
+            request.Function = address;
+            request.Arguments.push_back({ Target::CodeCallKind::Integer, parameter });
+            request.TimeoutMilliseconds = 10000;
+            if (!lua_isnoneornil(state, 3))
+            {
+                const lua_Integer timeout = luaL_checkinteger(state, 3);
+                request.Wait = timeout != 0;
+                request.TimeoutMilliseconds = timeout > 0 ? static_cast<std::uint32_t>(std::min<lua_Integer>(timeout, 0x7FFFFFFF)) : INFINITE;
+            }
+            const Result<std::uint64_t> result = Target::CallCode(*process, request);
+            if (!result)
+            {
+                lua_pushnil(state);
+                lua_pushstring(state, result.Error().Text.c_str());
+                return 2;
+            }
+            lua_pushinteger(state, static_cast<lua_Integer>(*result));
             return 1;
         }
 
