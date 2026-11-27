@@ -10,6 +10,7 @@
 #include "Lua/LuaArgs.h"
 #include "Lua/LuaEngine.h"
 #include "Scan/Scanner.h"
+#include "Target/CodeCall.h"
 
 #include "lua.hpp"
 
@@ -531,8 +532,25 @@ namespace Manifold::Lua
             const auto process = NeedProcess(state);
             const std::uint64_t address = AddressArgument(state, 1);
             const std::uint64_t parameter = lua_isnoneornil(state, 2) ? 0 : AddressArgument(state, 2);
-            const Status status = process->CreateThread(address, parameter, true);
-            lua_pushboolean(state, status.Ok());
+            Target::CodeCallRequest request;
+            request.Function = address;
+            request.Arguments.push_back({ Target::CodeCallKind::Integer, parameter });
+            if (!lua_isnoneornil(state, 3))
+            {
+                const lua_Integer timeout = luaL_checkinteger(state, 3);
+                request.Wait = timeout != 0;
+                request.TimeoutMilliseconds = timeout > 0 ? static_cast<std::uint32_t>(std::min<lua_Integer>(timeout, 0x7FFFFFFF)) : INFINITE;
+            }
+            const Result<std::uint64_t> result = Target::CallCode(*process, request);
+            if (!result)
+            {
+                lua_pushnil(state);
+                lua_pushstring(state, result.Error().Text.c_str());
+                return 2;
+            }
+            if (!request.Wait)
+                return 0;
+            lua_pushinteger(state, static_cast<lua_Integer>(*result));
             return 1;
         }
 
@@ -607,7 +625,8 @@ namespace Manifold::Lua
         int AutoAssemble(lua_State* state)
         {
             const char* script = luaL_checkstring(state, 1);
-            if (lua_toboolean(state, 2))
+            auto* given = static_cast<SharedMemory*>(luaL_testudata(state, 2, kDisableInfoType));
+            if (!given && lua_toboolean(state, 2))
             {
                 const std::string message = "autoAssemble: assembling into the program itself (targetself) is not supported";
                 LOG_WARN("Lua", message);
@@ -615,7 +634,8 @@ namespace Manifold::Lua
                 lua_pushstring(state, message.c_str());
                 return 2;
             }
-            auto* given = static_cast<SharedMemory*>(luaL_testudata(state, 3, kDisableInfoType));
+            if (!given)
+                given = static_cast<SharedMemory*>(luaL_testudata(state, 3, kDisableInfoType));
             const SharedMemory memory = given ? *given : std::make_shared<Asm::AaMemory>();
             const bool sections = Asm::HasSections(script);
             const Asm::AaSection section = !sections ? Asm::AaSection::Whole : given ? Asm::AaSection::Disable : Asm::AaSection::Enable;
@@ -716,11 +736,13 @@ namespace Manifold::Lua
             lua_setfield(state, -2, "Count");
             lua_pushcfunction(state, [](lua_State*) -> int { return 0; });
             lua_setfield(state, -2, "destroy");
-            lua_pushcfunction(state, [](lua_State* inner) -> int
+            lua_pushvalue(state, -1);
+            lua_pushcclosure(state, [](lua_State* inner) -> int
                 {
-                    lua_rawgeti(inner, 1, luaL_checkinteger(inner, 2));
+                    const int index = lua_rawequal(inner, 1, lua_upvalueindex(1)) ? 2 : 1;
+                    lua_rawgeti(inner, lua_upvalueindex(1), luaL_checkinteger(inner, index));
                     return 1;
-                });
+                }, 1);
             lua_setfield(state, -2, "getString");
             return 1;
         }
@@ -936,6 +958,8 @@ namespace Manifold::Lua
             std::memcpy(&value, bytes, sizeof(T));
             if constexpr (std::is_floating_point_v<T>)
                 lua_pushnumber(state, static_cast<lua_Number>(value));
+            else if constexpr (sizeof(T) < sizeof(lua_Integer))
+                lua_pushinteger(state, lua_toboolean(state, 2) ? static_cast<lua_Integer>(static_cast<std::make_signed_t<T>>(value)) : static_cast<lua_Integer>(value));
             else
                 lua_pushinteger(state, static_cast<lua_Integer>(value));
             return 1;

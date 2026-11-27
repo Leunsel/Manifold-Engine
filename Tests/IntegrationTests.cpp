@@ -46,6 +46,22 @@ namespace Manifold::Tests
             local mixed = executeCodeEx(1, nil, module .. '.MixedCall', 1, { type = 2, value = 2.5 }, { type = 1, value = 1.5 }, 4, 5, { type = 2, value = 0.25 })
             if mixed ~= 1 + 2 + 3 + 40 + 500 + 250 then return 'mixed parameters ' .. tostring(mixed) end
             if pcall(executeCodeEx, 0, nil, 0) then return 'address 0 accepted' end
+            local answerStub = allocateMemory(0x100)
+            if not autoAssemble(string.format('%X:\nmov eax,2A\n%s', answerStub, wide and 'ret' or 'ret 4')) then return 'the answer stub did not assemble' end
+            local answered = executeCode(answerStub, 0)
+            if answered ~= 42 then return 'executeCode gave ' .. tostring(answered) end
+            local unwaited = executeCode(answerStub, 0, 0)
+            if unwaited ~= nil then return 'executeCode without a wait gave ' .. tostring(unwaited) end
+            local slowStub = allocateMemory(0x100)
+            local slow = wide and 'sub rsp,28\nmov ecx,#1000\nmov rax,kernel32.Sleep\ncall rax\nadd rsp,28\nret' or 'push #1000\nmov eax,kernel32.Sleep\ncall eax\nret 4'
+            if not autoAssemble(string.format('%X:\n%s', slowStub, slow)) then return 'the slow stub did not assemble' end
+            local timedOut, late = executeCode(slowStub, 0, 100)
+            if timedOut ~= nil or not late then return 'executeCode ignored its timeout: ' .. tostring(timedOut) end
+            local patientStub = allocateMemory(0x100)
+            local patient = wide and 'sub rsp,28\nmov ecx,#10500\nmov rax,kernel32.Sleep\ncall rax\nadd rsp,28\nmov eax,2A\nret' or 'push #10500\nmov eax,kernel32.Sleep\ncall eax\nmov eax,2A\nret 4'
+            if not autoAssemble(string.format('%X:\n%s', patientStub, patient)) then return 'the patient stub did not assemble' end
+            local waited, reason = executeCode(patientStub, 0)
+            if waited ~= 42 then return 'executeCode without a timeout gave ' .. tostring(waited) .. ' ' .. tostring(reason) end
 
             local probe = readPointer(module .. '.g_callProbe')
             local add = readPointer(readPointer(probe))
@@ -72,6 +88,9 @@ namespace Manifold::Tests
             local hits = AOBScan(aob)
             if not hits or hits.Count ~= 1 then return 'the AOB is not unique: ' .. aob end
             if tonumber(hits[0], 16) + offset ~= damage then return 'the AOB does not lead to the address' end
+            local dotted, first = pcall(function() return hits.getString(0) end)
+            if not dotted or first ~= hits[0] then return 'dot getString: ' .. tostring(first) end
+            if hits:getString(0) ~= hits[0] then return 'colon getString' end
             hits.destroy()
             if getUniqueAOB(0x10) ~= nil then return 'an AOB for unreadable memory' end
             return 'ok|' .. aob .. '|' .. offset)LUA",
@@ -1144,6 +1163,12 @@ namespace Manifold::Tests
                 if autoAssemble(script, false, info) ~= true then return "disable" end
                 if getAddressSafe("compatvalue") ~= nil or getAddressSafe("other") ~= nil then return "still registered" end
                 if readInteger(address) ~= nil then return "not freed" end
+                local again, info2 = autoAssemble(script)
+                if not again then return "enable again: " .. tostring(info2) end
+                local disabled, why = autoAssemble(script, info2)
+                if disabled ~= true then return "two-arg disable: " .. tostring(why) end
+                if getAddressSafe("compatvalue") ~= nil then return "still registered after the two-arg disable" end
+                if autoAssemble(script, true) ~= false then return "targetself accepted" end
                 return "ok")LUA", "integration", answer);
             CHECK_MSG(run.Ok() && answer == "ok", run.Ok() ? answer : run.Text);
         }
