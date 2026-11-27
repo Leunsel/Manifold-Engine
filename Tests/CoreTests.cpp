@@ -488,6 +488,30 @@ namespace Manifold::Tests
             CHECK(older.DisasmNotes.count("game.exe+1234") && older.DisasmNotes["game.exe+1234"].Comment == "old note" && older.DisasmNotes["game.exe+1234"].Header == "Old");
         }
 
+        void TableStructureCustomType()
+        {
+            Table::StructureStore structures;
+            Table::StructDefinition& player = structures.Add("Player");
+            player.Fields.push_back({ 0x8, "Purse", Scan::ValueType::Pointer, 8, Table::FieldDisplay::Hex, false, "Purse" });
+            player.Fields.push_back({ 0x10, "Gold", Scan::ValueType::ByteArray, 4, Table::FieldDisplay::Unsigned, false, "", "Obscured" });
+            structures.Add("Purse").Fields.push_back({ 0x4, "Coins", Scan::ValueType::ByteArray, 4, Table::FieldDisplay::Unsigned, false, "", "Obscured" });
+            const auto count = [](const std::string& text, const std::string& wanted)
+                {
+                    std::size_t found = 0;
+                    for (std::size_t at = text.find(wanted); at != std::string::npos; at = text.find(wanted, at + 1))
+                        ++found;
+                    return found;
+                };
+            const std::string saved = Table::WriteTable(Table::AddressList(), structures, {});
+            CHECK_MSG(count(saved, "Customtype=\"Obscured\"") == 2, "table save without Cheat Engine's Customtype: " + saved);
+            const std::string copied = Table::FieldsToXml(structures, player.Fields);
+            CHECK_MSG(count(copied, "Customtype=\"Obscured\"") == 2, "copied child structure without Cheat Engine's Customtype: " + copied);
+            Table::LoadedTable loaded;
+            CHECK(Table::ParseTable(saved, loaded).Ok() && loaded.Structures.size() == 2);
+            if (loaded.Structures.size() == 2)
+                CHECK(loaded.Structures[0]->Fields.size() == 2 && loaded.Structures[0]->Fields[1].CustomType == "Obscured" && loaded.Structures[1]->Fields[0].CustomType == "Obscured");
+        }
+
         void AutoAssemblerOffline()
         {
             Asm::AaHost host;
@@ -2258,6 +2282,7 @@ hostileRan = true
         TableRoundTrip();
         TableSectionsKept();
         TableDisassemblerComments();
+        TableStructureCustomType();
         AutoAssemblerOffline();
         CodeSearchHelpers();
         ScanKinds();

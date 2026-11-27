@@ -403,7 +403,10 @@ namespace Manifold::Table
             element.SetAttribute("Offset", std::to_string(field.Offset));
             element.SetAttribute("Vartype", !field.CustomType.empty() ? "Custom" : field.Type == Scan::ValueType::String && field.Unicode ? "Unicode String" : Scan::TableTypeName(field.Type));
             if (!field.CustomType.empty())
+            {
                 element.SetAttribute("CustomType", field.CustomType);
+                element.SetAttribute("Customtype", field.CustomType);
+            }
             element.SetAttribute("Bytesize", std::to_string(field.Size));
             element.SetAttribute("OffsetHex", Hex(static_cast<std::uint64_t>(field.Offset), 8));
             element.SetAttribute("Description", field.Name);
