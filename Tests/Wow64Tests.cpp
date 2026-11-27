@@ -731,6 +731,62 @@ namespace Manifold::Tests
                     debugger.Resume(Debug::ResumeMode::Continue);
             }
 
+            // Issue #17: Step Into on call eax and jmp eax stops where EAX points, Step Over
+            // on call eax after the call. A thread of the target runs the code below in a loop.
+            if (const auto page = process.Allocate(0x1000, PAGE_EXECUTE_READWRITE); page && *page < 0x100000000ull)
+            {
+                const std::uint32_t code = static_cast<std::uint32_t>(*page);
+                std::uint8_t bytes[] = {
+                    0xB8, 0, 0, 0, 0,                                                       // 00 mov eax,code+30
+                    0xFF, 0xD0,                                                             // 05 call eax
+                    0xB8, 0, 0, 0, 0,                                                       // 07 mov eax,code+20
+                    0xFF, 0xE0,                                                             // 0C jmp eax
+                    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, // 0E
+                    0x90, 0x90, 0x90, 0x90, 0x90, 0x90,                                     // 1A
+                    0xF3, 0x90,                                                             // 20 pause
+                    0xA1, 0, 0, 0, 0,                                                       // 22 mov eax,[code+100]
+                    0x85, 0xC0,                                                             // 27 test eax,eax
+                    0x75, 0x02,                                                             // 29 jnz 2D
+                    0xEB, 0xD3,                                                             // 2B jmp 00
+                    0xC2, 0x04, 0x00,                                                       // 2D ret 4 (the thread ends)
+                    0xC3,                                                                   // 30 ret
+                };
+                const std::uint32_t callee = code + 0x30, after = code + 0x20, flag = code + 0x100;
+                std::memcpy(bytes + 0x01, &callee, 4);
+                std::memcpy(bytes + 0x08, &after, 4);
+                std::memcpy(bytes + 0x23, &flag, 4);
+                const Status started = process.Write(code, bytes, sizeof(bytes)) ? process.CreateThread(code, 0, false) : Status::Fail(ErrorCode::WriteFailed);
+                CHECK_MSG(started.Ok(), started.Text);
+                const auto step = [&](std::uint64_t from, Debug::ResumeMode mode, std::uint64_t expected, const std::string& what)
+                    {
+                        const Status set = debugger.SetBreakpoint(from, Debug::BreakpointType::Execute, 1, false);
+                        CHECK_MSG(set.Ok(), set.Text);
+                        const bool broke = set && WaitForBreak(engine, debugger.Break().Serial, 4000);
+                        debugger.RemoveBreakpoint(from);
+                        CHECK_MSG(broke && debugger.Break().Address == from, what + ": no break at " + Hex(from));
+                        if (!broke)
+                            return;
+                        const Debug::BreakInfo at = debugger.Break();
+                        debugger.Resume(mode);
+                        const bool stepped = WaitForBreak(engine, at.Serial, 2000);
+                        CHECK_MSG(stepped && debugger.Break().Address == expected,
+                            what + (stepped ? " stopped at " + Hex(debugger.Break().Address) : std::string(" did not stop")) + ", expected " + Hex(expected));
+                        if (debugger.Broken())
+                            debugger.Resume(Debug::ResumeMode::Continue);
+                    };
+                if (started)
+                {
+                    step(code + 0x05, Debug::ResumeMode::StepOver, code + 0x07, "in-process: step over call eax");
+                    step(code + 0x05, Debug::ResumeMode::StepInto, code + 0x30, "in-process: step into call eax");
+                    step(code + 0x0C, Debug::ResumeMode::StepInto, code + 0x20, "in-process: step into jmp eax");
+                }
+                const std::uint32_t stop = 1;
+                process.Write(code + 0x100, &stop, sizeof(stop));
+                Wait(engine, 100);
+            }
+            else
+                CHECK_MSG(false, "in-process: no page below 4 GB for the register branch code");
+
             debugger.Detach();
             Wait(engine, 400);
             CHECK(process.Alive());

@@ -365,6 +365,29 @@ namespace Manifold::Debug
             raw.GsBase = is64Bit ? r.GsBase : r.FsBase;
             return raw;
         }
+
+        // ∑ A register-indirect branch (call rax, jmp eax) decodes with neither a target nor a memory operand: its operand text is the register.
+        std::optional<std::uint64_t> BranchRegister(std::string_view name, const Disasm::RegisterValues& r)
+        {
+            using R = Disasm::RegisterValues;
+            struct Named
+            {
+                std::string_view Wide, Low;
+                std::uint64_t R::* Value;
+            };
+            static constexpr Named kNames[] = { { "rax", "eax", &R::Rax }, { "rbx", "ebx", &R::Rbx }, { "rcx", "ecx", &R::Rcx }, { "rdx", "edx", &R::Rdx },
+                { "rsi", "esi", &R::Rsi }, { "rdi", "edi", &R::Rdi }, { "rbp", "ebp", &R::Rbp }, { "rsp", "esp", &R::Rsp }, { "r8", "r8d", &R::R8 },
+                { "r9", "r9d", &R::R9 }, { "r10", "r10d", &R::R10 }, { "r11", "r11d", &R::R11 }, { "r12", "r12d", &R::R12 }, { "r13", "r13d", &R::R13 },
+                { "r14", "r14d", &R::R14 }, { "r15", "r15d", &R::R15 } };
+            for (const Named& named : kNames)
+            {
+                if (name == named.Wide)
+                    return r.*named.Value;
+                if (name == named.Low)
+                    return r.*named.Value & 0xFFFFFFFFull;
+            }
+            return std::nullopt;
+        }
     }
 
     struct Debugger::ThreadState
@@ -2279,8 +2302,12 @@ namespace Manifold::Debug
             else
             {
                 if (ins.Memory.Present)
+                {
                     if (const auto address = m_disassembler->EffectiveAddress(ins, regs))
                         out.push_back(readPointer(*address));
+                }
+                else if (const auto value = BranchRegister(ins.Operands, regs))
+                    out.push_back(*value);
                 out.push_back(ins.Next());
             }
             break;
@@ -2292,6 +2319,8 @@ namespace Manifold::Debug
                 if (const auto address = m_disassembler->EffectiveAddress(ins, regs))
                     out.push_back(readPointer(*address));
             }
+            else if (const auto value = BranchRegister(ins.Operands, regs))
+                out.push_back(*value);
             else
                 out.push_back(ins.Next());
             break;

@@ -745,6 +745,62 @@ namespace Manifold::Tests
         CHECK_MSG(process.Alive() && SharedMoves(engine, 300), std::string(backend) + ": the target does not run after stepping");
     }
 
+    // Issue #17: Step Into on call rax and jmp rax stops where RAX points, Step Over
+    // on call rax after the call. A thread of the target runs the code below in a loop.
+    void CheckRegisterBranchSteps(Engine& engine)
+    {
+        Debug::Debugger& debugger = engine.Debugger();
+        const Target::Process& process = *engine.Process();
+        const auto page = process.Allocate(0x1000, PAGE_EXECUTE_READWRITE);
+        CHECK_MSG(page.Ok(), page ? std::string() : page.Error().Text);
+        if (!page)
+            return;
+        const std::uint64_t code = *page;
+        const std::uint8_t bytes[] = {
+            0x48, 0x8D, 0x05, 0x29, 0x00, 0x00, 0x00,                                           // 00 lea rax,[code+30]
+            0xFF, 0xD0,                                                                         // 07 call rax
+            0x48, 0x8D, 0x05, 0x10, 0x00, 0x00, 0x00,                                           // 09 lea rax,[code+20]
+            0xFF, 0xE0,                                                                         // 10 jmp rax
+            0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, // 12
+            0xF3, 0x90,                                                                         // 20 pause
+            0x8B, 0x05, 0xD8, 0x00, 0x00, 0x00,                                                 // 22 mov eax,[code+100]
+            0x85, 0xC0,                                                                         // 28 test eax,eax
+            0x75, 0x02,                                                                         // 2A jnz 2E
+            0xEB, 0xD2,                                                                         // 2C jmp 00
+            0xC3, 0x90,                                                                         // 2E ret (the thread ends)
+            0xC3,                                                                               // 30 ret
+        };
+        const Status written = process.Write(code, bytes, sizeof(bytes));
+        CHECK_MSG(written.Ok(), written.Text);
+        const Status started = written ? process.CreateThread(code, 0, false) : written;
+        CHECK_MSG(started.Ok(), started.Text);
+        if (!started)
+            return;
+        const auto step = [&](std::uint64_t from, Debug::ResumeMode mode, std::uint64_t expected, const std::string& what)
+            {
+                const Status set = debugger.SetBreakpoint(from, Debug::BreakpointType::Execute, 1, false);
+                CHECK_MSG(set.Ok(), set.Text);
+                const bool broke = set && WaitForBreak(engine, debugger.Break().Serial, 4000);
+                debugger.RemoveBreakpoint(from);
+                CHECK_MSG(broke && debugger.Break().Address == from, what + ": no break at " + Hex(from));
+                if (!broke)
+                    return;
+                const Debug::BreakInfo at = debugger.Break();
+                debugger.Resume(mode);
+                const bool stepped = WaitForBreak(engine, at.Serial, 2000);
+                CHECK_MSG(stepped && debugger.Break().Address == expected,
+                    what + (stepped ? " stopped at " + Hex(debugger.Break().Address) : std::string(" did not stop")) + ", expected " + Hex(expected));
+                if (debugger.Broken())
+                    debugger.Resume(Debug::ResumeMode::Continue);
+            };
+        step(code + 0x07, Debug::ResumeMode::StepOver, code + 0x09, "step over call rax");
+        step(code + 0x07, Debug::ResumeMode::StepInto, code + 0x30, "step into call rax");
+        step(code + 0x10, Debug::ResumeMode::StepInto, code + 0x20, "step into jmp rax");
+        const std::uint32_t stop = 1;
+        process.Write(code + 0x100, &stop, sizeof(stop));
+        Wait(engine, 100);
+    }
+
     void CheckDetachPaths(Engine& engine)
     {
         Debug::Debugger& debugger = engine.Debugger();
@@ -1369,6 +1425,7 @@ namespace Manifold::Tests
                 CheckFpuAndExceptions(engine, true);
                 CheckStepOut(engine, true);
                 CheckTraceOneThread(engine, true);
+                CheckRegisterBranchSteps(engine);
                 CheckHostSilence(engine);
                 engine.Debugger().Detach();
                 Wait(engine, 400);
