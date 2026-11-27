@@ -573,6 +573,17 @@ namespace Manifold::Tests
             for (const Table::StructField& field : edge)
                 CHECK(field.Offset <= Table::kMaxFieldOffset);
 
+            std::string many = "<CheatTable><CheatEntries/><Structures StructVersion=\"2\">";
+            for (int i = 0; i < 8; ++i)
+                many += "<Structure Name=\"Huge" + std::to_string(i) + "\"><Elements><Element Offset=\"0\" Vartype=\"Byte\" Bytesize=\"1\" RLECount=\"999999999\" DisplayMethod=\"unsigned integer\"/></Elements></Structure>";
+            many += "</Structures></CheatTable>";
+            Table::LoadedTable manyLoaded;
+            CHECK(Table::ParseTable(many, manyLoaded).Ok());
+            std::size_t manyFields = 0;
+            for (const auto& structure : manyLoaded.Structures)
+                manyFields += structure->Fields.size();
+            CHECK_MSG(manyLoaded.Structures.size() == 8 && manyFields <= 0x40008, "8 structures with RLECount=999999999 gave " + std::to_string(manyFields) + " fields in all");
+
             const std::string copied = "<Elements>"
                 "<Element Offset=\"0\" Vartype=\"Float\" Bytesize=\"4\" RLECount=\"3\" OffsetHex=\"00000000\" Description=\"Axis\" DisplayMethod=\"unsigned integer\"/>"
                 "<Element Offset=\"16\" Vartype=\"Pointer\" Bytesize=\"8\" OffsetHex=\"00000010\" DisplayMethod=\"unsigned integer\" ChildStruct=\"Inner\">"

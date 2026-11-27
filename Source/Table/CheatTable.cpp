@@ -388,13 +388,14 @@ namespace Manifold::Table
         }
 
         constexpr std::size_t kMaxRunFields = 0x10000;
+        constexpr std::size_t kMaxTableRunFields = 0x40000;
 
-        void AddElement(std::vector<StructField>& fields, const Xml::Node& element)
+        void AddElement(std::vector<StructField>& fields, const Xml::Node& element, std::size_t& room)
         {
             fields.push_back(ReadElement(element));
             const StructField first = fields.back();
             const std::int64_t count = ParseDecimal(element.Attribute("RLECount").value_or("1")).value_or(1);
-            for (std::int64_t i = 1; i < count && fields.size() < kMaxRunFields; ++i)
+            for (std::int64_t i = 1; i < count && fields.size() < kMaxRunFields && room > 0; ++i, --room)
             {
                 const std::int64_t offset = first.Offset + i * first.Size;
                 if (offset > kMaxFieldOffset)
@@ -404,7 +405,7 @@ namespace Manifold::Table
             }
         }
 
-        std::unique_ptr<StructDefinition> ReadStructure(const Xml::Node& node)
+        std::unique_ptr<StructDefinition> ReadStructure(const Xml::Node& node, std::size_t& room)
         {
             auto definition = std::make_unique<StructDefinition>();
             definition->Name = node.Attribute("Name").value_or("Structure");
@@ -412,7 +413,7 @@ namespace Manifold::Table
             if (!elements)
                 return definition;
             for (const Xml::Node* element : elements->ChildrenNamed("Element"))
-                AddElement(definition->Fields, *element);
+                AddElement(definition->Fields, *element, room);
             definition->Sort();
             return definition;
         }
@@ -489,8 +490,9 @@ namespace Manifold::Table
         }
         if (const Xml::Node* structures = root.Child("Structures"))
         {
+            std::size_t room = kMaxTableRunFields;
             for (const Xml::Node* structure : structures->ChildrenNamed("Structure"))
-                table.Structures.push_back(ReadStructure(*structure));
+                table.Structures.push_back(ReadStructure(*structure, room));
         }
         table.LuaScript = root.ChildText("LuaScript");
         table.Comments = root.ChildText("Comments");
@@ -726,7 +728,7 @@ namespace Manifold::Table
                 WriteNestedStructures(WriteElement(elements, inner), store, inner, written, depth + 1);
         }
 
-        void ReadNestedStructures(const Xml::Node& elements, PastedFields& pasted, std::set<std::string>& seen, int depth)
+        void ReadNestedStructures(const Xml::Node& elements, PastedFields& pasted, std::set<std::string>& seen, int depth, std::size_t& room)
         {
             if (depth > kMaxNestedStructures)
                 return;
@@ -735,11 +737,11 @@ namespace Manifold::Table
                 const Xml::Node* structure = element->Child("Structure");
                 if (!structure || static_cast<int>(pasted.Structures.size()) >= kMaxNestedStructures)
                     continue;
-                std::unique_ptr<StructDefinition> definition = ReadStructure(*structure);
+                std::unique_ptr<StructDefinition> definition = ReadStructure(*structure, room);
                 if (!seen.insert(Lower(definition->Name)).second)
                     continue;
                 if (const Xml::Node* inner = structure->Child("Elements"))
-                    ReadNestedStructures(*inner, pasted, seen, depth + 1);
+                    ReadNestedStructures(*inner, pasted, seen, depth + 1, room);
                 pasted.Structures.push_back(std::move(definition));
             }
         }
@@ -774,12 +776,13 @@ namespace Manifold::Table
         if (!elements || elements->Name != "Elements")
             return std::nullopt;
         PastedFields pasted;
+        std::size_t room = kMaxTableRunFields;
         for (const Xml::Node* element : elements->ChildrenNamed("Element"))
-            AddElement(pasted.Fields, *element);
+            AddElement(pasted.Fields, *element, room);
         if (pasted.Fields.empty())
             return std::nullopt;
         std::set<std::string> seen;
-        ReadNestedStructures(*elements, pasted, seen, 0);
+        ReadNestedStructures(*elements, pasted, seen, 0, room);
         return pasted;
     }
 
