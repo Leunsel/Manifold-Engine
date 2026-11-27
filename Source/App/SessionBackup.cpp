@@ -465,7 +465,9 @@ namespace Manifold
 
     void SessionBackup::Restored(const std::filesystem::path& file)
     {
-        m_restored = Backups::IsVersion(file) ? Backups::SafeName(WideToUtf8(file.parent_path().filename().wstring())) : std::string();
+        const std::string folder = WideToUtf8(file.parent_path().filename().wstring());
+        const std::string shown = Backups::ShownName(folder);
+        m_restored = Backups::IsVersion(file) ? Backups::SafeName(shown) + folder.substr(shown.size()) : std::string();
         const std::string text = Table::WriteTable(m_engine.Table(), m_engine.Structures(), m_engine.TableSymbols(), m_engine.TableFileNaming());
         m_hasLast = true;
         m_lastHash = std::hash<std::string>{}(text);

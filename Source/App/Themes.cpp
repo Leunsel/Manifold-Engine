@@ -261,7 +261,12 @@ namespace Manifold::Themes
         while (!stem.empty() && (stem.back() == '.' || stem.back() == ' '))
             stem.pop_back();
         if (stem.size() > 80)
-            stem.resize(80);
+        {
+            std::size_t cut = 80;
+            while (cut > 0 && (static_cast<unsigned char>(stem[cut]) & 0xC0) == 0x80)
+                --cut;
+            stem.resize(cut);
+        }
         if (stem.empty())
             stem = "Theme";
         if (ReservedStem(stem))
