@@ -806,7 +806,7 @@ namespace Manifold::Disasm
         if (!instruction.Memory.Present)
             return std::nullopt;
         const MemoryOperand& memory = instruction.Memory;
-        if (memory.Absolute)
+        if (memory.Absolute && (memory.RipRelative || (memory.Segment != ZYDIS_REGISTER_FS && memory.Segment != ZYDIS_REGISTER_GS)))
             return memory.Absolute;
         std::uint64_t address = static_cast<std::uint64_t>(memory.Displacement);
         if (memory.Base != ZYDIS_REGISTER_NONE)

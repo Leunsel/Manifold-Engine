@@ -456,6 +456,35 @@ namespace Manifold::Tests
                 wide.find("RIP 000000003052714F") != std::string::npos, wide);
         }
 
+        // ∑ Issue #18: gs:[0x30] and fs:[0x30] resolved to 0x30, without the segment base. Operands without
+        //   FS or GS, RIP-relative ones and the register forms are the controls.
+        void SegmentBaseEffectiveAddress()
+        {
+            const auto effective = [](bool is64, const std::vector<std::uint8_t>& bytes, const Disasm::RegisterValues& r) {
+                const Disasm::Disassembler disassembler(is64);
+                const Disasm::Instruction line = disassembler.Decode(0x1000, bytes.data(), bytes.size());
+                return line.Valid ? disassembler.EffectiveAddress(line, r) : std::nullopt;
+            };
+            const auto check = [](const std::optional<std::uint64_t>& got, std::uint64_t expected, const char* what) {
+                CHECK_MSG(got == expected, std::string(what) + ": " + (got ? Hex(*got) : std::string("none")) + " instead of " + Hex(expected));
+            };
+            Disasm::RegisterValues r64;
+            r64.GsBase = 0x71000000;
+            r64.Rax = 0x76543210;
+            check(effective(true, { 0x65, 0x48, 0x8B, 0x04, 0x25, 0x30, 0x00, 0x00, 0x00 }, r64), 0x71000030, "mov rax, gs:[0x30]");
+            check(effective(true, { 0x65, 0x48, 0x8B, 0x40, 0x30 }, r64), 0xE7543240, "mov rax, gs:[rax+0x30]");
+            check(effective(true, { 0x8B, 0x04, 0x25, 0x34, 0x12, 0x00, 0x00 }, r64), 0x1234, "mov eax, [0x1234]");
+            check(effective(true, { 0x48, 0xA1, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11 }, r64), 0x1122334455667788, "mov rax, [0x1122334455667788]");
+            check(effective(true, { 0x48, 0x8B, 0x05, 0x10, 0x00, 0x00, 0x00 }, r64), 0x1017, "mov rax, [rip+0x10]");
+            Disasm::RegisterValues r32;
+            r32.FsBase = 0x71000000;
+            r32.Rax = 0x1000;
+            check(effective(false, { 0x64, 0x8B, 0x0D, 0x30, 0x00, 0x00, 0x00 }, r32), 0x71000030, "mov ecx, fs:[0x30]");
+            check(effective(false, { 0x64, 0xA1, 0x18, 0x00, 0x00, 0x00 }, r32), 0x71000018, "mov eax, fs:[0x18]");
+            check(effective(false, { 0x64, 0x8B, 0x48, 0x30 }, r32), 0x71001030, "mov ecx, fs:[eax+0x30]");
+            check(effective(false, { 0xA1, 0x34, 0x12, 0x00, 0x00 }, r32), 0x1234, "mov eax, [0x1234]");
+        }
+
         void InstructionHelp()
         {
             CHECK(Asm::MnemonicSummary("MOV").rfind("Copies the source", 0) == 0);
@@ -1067,6 +1096,7 @@ namespace Manifold::Tests
         const int before = Totals().Failures;
         AddressByteMasks();
         RegisterNames();
+        SegmentBaseEffectiveAddress();
         CheatEngineCapture();
         PascalNumbers();
         CheatEngineExtraRules();
