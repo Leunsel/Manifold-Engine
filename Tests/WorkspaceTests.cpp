@@ -5,6 +5,7 @@
 #include "Core/Paths.h"
 #include "Core/Text.h"
 #include "Layout/Layout.h"
+#include "Generated/IconsFontAwesome5.h"
 #include "UI/Workspace.h"
 
 #include "imgui.h"
@@ -106,6 +107,28 @@ namespace Manifold::Tests
             {
                 for (int i = 0; i < count; ++i)
                     Frame([&] { workspace.Draw(); });
+            }
+
+            // ∑ A click on a button or menu item drawn directly in a window (not in a child of it): its ID is the label hashed
+            //   with the window's, and ImGui presses it on the next frame as keyboard navigation would.
+            bool Activate(Workspace& workspace, const std::string& window, const char* label)
+            {
+                bool found = false;
+                Frame([&] {
+                    for (ImGuiWindow* candidate : ImGui::GetCurrentContext()->Windows)
+                    {
+                        if (!found && candidate->WasActive && std::string(candidate->Name).find(window) != std::string::npos)
+                        {
+                            ImGui::FocusWindow(candidate);
+                            ImGui::ActivateItemByID(ImHashStr(label, 0, candidate->ID));
+                            found = true;
+                        }
+                    }
+                    workspace.Draw();
+                });
+                Frame([&] { workspace.Draw(); });
+                Frame([&] { workspace.Draw(); });
+                return found;
             }
 
             // A key pressed and let go; with a name, first the window whose name contains it gets the focus.
@@ -285,12 +308,44 @@ namespace Manifold::Tests
             CHECK_MSG(editors == 2, "opening record 3 of table b gave " + std::to_string(editors) + " script editors: the one of table a came back instead of a new one");
         }
 
+        bool ShowsSaveError()
+        {
+            for (const ImGuiWindow* window : ImGui::GetCurrentContext()->Windows)
+            {
+                if (window->Active && std::string(window->Name).find("###scripterror") != std::string::npos)
+                    return true;
+            }
+            return false;
+        }
+
+        // An Auto Assemble window opened before a table, then Add to Table: the record is in the current table, so Save saves.
+        void AddToTableAfterNewTable()
+        {
+            Settings settings;
+            Engine engine(settings);
+            UiFrames frames;
+            FakeShell shell;
+            Workspace workspace(engine, shell);
+            workspace.OpenScript("[ENABLE]\n// free\n[DISABLE]\n", UI::kNoRecord);
+            frames.Frames(workspace, 5);
+            engine.NewTable();
+            frames.Frames(workspace, 2);
+            const std::string window = ScriptWindowId();
+            CHECK_MSG(frames.Activate(workspace, window, ICON_FA_TABLE "  Add to Table"), "no script window");
+            std::size_t records = 0;
+            engine.Table().ForEach([&](Table::MemoryRecord&) { ++records; });
+            CHECK_MSG(records == 1, "Add to Table made " + std::to_string(records) + " records");
+            frames.Press(workspace, window, ImGuiKey_S, ImGuiMod_Ctrl);
+            CHECK_MSG(!ShowsSaveError(), "Save of a script added to the current table was refused");
+        }
+
         int RunWorkspaceTests()
         {
             const int before = Totals().Failures;
             Smoke();
             DeleteConfirmAfterDrop();
             EditorAfterTableReplaced();
+            AddToTableAfterNewTable();
             return Totals().Failures - before;
         }
     }

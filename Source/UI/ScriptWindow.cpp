@@ -358,6 +358,7 @@ namespace Manifold::UI
     {
         Table::MemoryRecord& record = m_engine.Table().AddScript("Auto Assemble script", m_text);
         m_recordId = record.Id;
+        m_tableIdentity = m_engine.Table().Identity();
         m_saved = m_text;
         m_resultOk = true;
         m_result = "Added to the address list.";
