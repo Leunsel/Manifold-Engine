@@ -1746,6 +1746,12 @@ hostileRan = true
         const Table::MemoryRecord& value = *group.Children[0];
         CHECK_MSG(group.Id == 1337213022 && value.Id == 1337212707, "IDs after load: " + std::to_string(group.Id) + ", " + std::to_string(value.Id));
         CHECK_MSG(value.Hotkeys.size() == 1 && value.Hotkeys[0].Id == 1337212708, value.Hotkeys.empty() ? std::string("no hotkey") : "hotkey ID after load: " + std::to_string(value.Hotkeys[0].Id));
+
+        Table::LoadedTable over;
+        CHECK(Table::ParseTable("<CheatTable><CheatEntries><CheatEntry><ID>1879048192</ID><Description>\"Over\"</Description><GroupHeader>1</GroupHeader></CheatEntry>"
+            "<CheatEntry><ID>1879048191</ID><Description>\"Last\"</Description><GroupHeader>1</GroupHeader></CheatEntry></CheatEntries></CheatTable>", over).Ok());
+        CHECK_MSG(over.Records.size() == 2 && over.Records[0]->Id == 0 && over.Records[1]->Id == Table::kMaxRecordId,
+            over.Records.size() == 2 ? "IDs past and at the limit after load: " + std::to_string(over.Records[0]->Id) + ", " + std::to_string(over.Records[1]->Id) : std::string("records lost"));
     }
 
     void SharedRecordIds()
