@@ -157,6 +157,7 @@ namespace FakeUnreal3
             Fake.EnumClass = Object("Enum");
             Fake.FunctionClass = Object("Function");
             const std::uintptr_t floatClass = Object("FloatProperty");
+            m_floatClass = floatClass;
             const std::uintptr_t objectClass = Object("ObjectProperty");
             const std::uintptr_t structClass = Object("StructProperty");
             const std::uintptr_t boolClass = Object("BoolProperty");
@@ -423,6 +424,17 @@ namespace FakeUnreal3
             return holder;
         }
 
+        std::uintptr_t FunctionLocal(std::uintptr_t function)
+        {
+            const Offsets& o = Native(m_early);
+            const std::uintptr_t local = Property(m_floatClass, function, "Counter", 4, 4, 0);
+            Put<std::uint64_t>(local, o.ArrayDim + 8, 0);
+            const std::uintptr_t parameter = Property(m_floatClass, function, "Amount", 0, 4, local);
+            Put<std::uint64_t>(parameter, o.ArrayDim + 8, 0x80);
+            Put<std::uintptr_t>(function, o.Children, parameter);
+            return parameter;
+        }
+
         Image Fake{};
 
     private:
@@ -496,6 +508,7 @@ namespace FakeUnreal3
 
         bool m_early = false;
         bool m_noLocation = false;
+        std::uintptr_t m_floatClass = 0;
         std::uint8_t* m_names = nullptr;
         std::uint8_t* m_nameArray = nullptr;
         std::uint8_t* m_objects = nullptr;

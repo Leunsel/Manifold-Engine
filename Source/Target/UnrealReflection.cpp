@@ -66,6 +66,7 @@ namespace Manifold::Target
         const std::vector<std::string> kControllerPath = { "GameViewport", "World", "OwningGameInstance", "LocalPlayers[0]", "PlayerController" };
         const std::vector<std::string> kControllerPathUe3 = { "GamePlayers[0]", "Actor" };
         constexpr std::int64_t kMaxWalkIndex = 0x00FFFFFF;
+        constexpr std::uint64_t kPropertyParm = 0x80;
 
         void SortFields(std::vector<UnrealField>& list)
         {
@@ -757,7 +758,11 @@ namespace Manifold::Target
                     function.Owner = owner;
                     function.Address = field;
                     function.Flags = m_layout.FunctionFlags >= 0 ? ReadUInt(field + static_cast<std::uint64_t>(m_layout.FunctionFlags)).value_or(0) : 0;
-                    function.Parameters = OwnFields(field).Fields;
+                    for (UnrealField& parameter : OwnFields(field).Fields)
+                    {
+                        if (parameter.Flags & kPropertyParm)
+                            function.Parameters.push_back(std::move(parameter));
+                    }
                     list.Functions.push_back(std::move(function));
                 }
                 link = ReadPointer(field + static_cast<std::uint64_t>(m_layout.ChildNext));
@@ -1020,7 +1025,8 @@ namespace Manifold::Target
             if (f->Type == "ArrayProperty" && index)
             {
                 const std::uint64_t data = ReadPointer(slot).value_or(0);
-                slot = data ? data + static_cast<std::uint64_t>(*index) * static_cast<std::uint64_t>(m_pointer) : 0;
+                const std::int32_t count = ReadInt(slot + static_cast<std::uint64_t>(m_pointer)).value_or(0);
+                slot = data && *index < count ? data + static_cast<std::uint64_t>(*index) * static_cast<std::uint64_t>(m_pointer) : 0;
             }
             current = slot ? ReadPointer(slot).value_or(0) : 0;
         }
@@ -1097,6 +1103,15 @@ namespace Manifold::Target
             walk.Field = f;
             walk.Address += static_cast<std::uint64_t>(f->Start());
             walk.Expression += "+" + OffsetSymbol(f->Owner, f->Name);
+            if (index && f->Type != "ArrayProperty")
+            {
+                if (*index >= f->Dim)
+                    return Status::Fail(ErrorCode::UnrealNoProperty, NameOf(type).value_or("?") + "." + steps[i] + " (the property has " + std::to_string(f->Dim) + " elements)");
+                const std::uint64_t offset = static_cast<std::uint64_t>(*index) * static_cast<std::uint64_t>(f->Size);
+                walk.Address += offset;
+                if (offset)
+                    walk.Expression += Format("+%llX", static_cast<unsigned long long>(offset));
+            }
             bool isObject = IsObjectProperty(f->Type);
             bool isStruct = f->Type == "StructProperty";
             if (isStruct)
