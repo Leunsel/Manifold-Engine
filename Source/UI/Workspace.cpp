@@ -1,5 +1,6 @@
 #include "UI/Workspace.h"
 
+#include "App/Updates.h"
 #include "Core/Profiler.h"
 #include "Core/Text.h"
 #include "Core/BuildInfo.h"
@@ -1735,11 +1736,15 @@ namespace Manifold::UI
             ImGui::Spacing();
             bool close = false;
             {
-                Layout::Row buttons("##aboutbuttons", { Layout::Size::Fit(), Layout::Size::Fit() });
+                Layout::Row buttons("##aboutbuttons", { Layout::Size::Fit(), Layout::Size::Fit(), Layout::Size::Fit() });
                 buttons.Cell([&] { close = Layout::Button("Close", { .Width = Layout::Size::Fixed(100.0f) }); });
                 buttons.Cell([&] {
                     if (Layout::Button(m_aboutCredits ? ICON_FA_ARROW_LEFT "  Back##aboutpage" : ICON_FA_HEART "  Credits##aboutpage"))
                         m_aboutCredits = !m_aboutCredits;
+                });
+                buttons.Cell([&] {
+                    if (Layout::Button(ICON_FA_CODE_BRANCH "  GitHub##aboutgithub"))
+                        ::ShellExecuteW(nullptr, L"open", Utf8ToWide(Updates::kRepositoryPage).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
                 });
             }
             if (close)

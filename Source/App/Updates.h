@@ -27,6 +27,7 @@ namespace Manifold::Updates
     inline constexpr std::string_view kRepository = "Leunsel/Manifold-Engine";
     inline constexpr std::string_view kLatestRelease = "https://api.github.com/repos/Leunsel/Manifold-Engine/releases/latest";
     inline constexpr std::string_view kReleasesPage = "https://github.com/Leunsel/Manifold-Engine/releases";
+    inline constexpr std::string_view kRepositoryPage = "https://github.com/Leunsel/Manifold-Engine";
     // the release zips hold about 8 MB; anything far above that is not ours
     inline constexpr std::uint64_t kMaxDownload = 256ull * 1024ull * 1024ull;
 
