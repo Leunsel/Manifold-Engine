@@ -17,8 +17,8 @@ GUIDS = {
     "ManifoldClr": "{6C7D8E9F-A0B1-42C3-94D5-F60718293A41}",
 }
 
-TEST_EXCLUDED_DIRS = ("UI",)
-TEST_EXCLUDED_FILES = ("Main.cpp", "Application.cpp", "WindowHost.cpp", "CrashHandler.cpp", "Fonts.cpp")
+TEST_EXCLUDED_DIRS = ()
+TEST_EXCLUDED_FILES = ("Main.cpp", "Application.cpp", "WindowHost.cpp", "CrashHandler.cpp")
 
 
 def collect(folder, extensions):

@@ -42,7 +42,7 @@ Build/x64/Release/Manifold-Engine.Tests.exe --filter=core,structures > test.log 
 6. Run every suite the change touches, plus `core`. Before a merge into `main`, run the full suite.
 
 What cannot be shown this way:
-- `Source/UI` and `Application.cpp` are not built into the tests (`TEST_EXCLUDED_DIRS` in `Tools/gen_projects.py`). A UI bug needs a driven run of the program with `--home=<new folder>`, or it goes on the list as "read, not shown".
+- `Source/UI` is built into the tests: suite `workspace` draws a `Workspace` without a GPU and presses keys into a focused window, so a UI bug is shown there. `Application.cpp` and the window host are not built in (`TEST_EXCLUDED_FILES` in `Tools/gen_projects.py`); a bug there needs a driven run of the program with `--home=<new folder>`, or it goes on the list as "read, not shown".
 - A crash or power cut between two writes cannot be produced in a test. It also goes on the list.
 
 ## Before a commit
