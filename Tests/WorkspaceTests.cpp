@@ -2,10 +2,14 @@
 
 #include "App/Engine.h"
 #include "App/Settings.h"
+#include "App/Updates.h"
 #include "Core/Paths.h"
 #include "Core/Text.h"
 #include "Layout/Layout.h"
 #include "Generated/IconsFontAwesome5.h"
+#include "UI/UpdateDialog.h"
+
+#include <windows.h>
 #include "UI/Workspace.h"
 
 #include "imgui.h"
@@ -357,7 +361,48 @@ namespace Manifold::Tests
             return false;
         }
 
-        // The record editor opened on record 3 of one table, then another table loaded: Apply must not write into record 3 of
+        // U4: a manual check that finds a newer version while the update dialog is already open must leave it open and taking
+        // input (a second Show on an open dialog).
+        void UpdateDialogShownTwice()
+        {
+            const std::filesystem::path feed = TestFolder() / "feed.json";
+            std::ofstream(feed, std::ios::binary) << R"({"tag_name": "v99.0.0", "name": "Manifold Engine 99.0.0", "assets": []})";
+            ::SetEnvironmentVariableW(L"MANIFOLD_UPDATE_FEED", feed.c_str());
+            Settings settings;
+            Engine engine(settings);
+            UiFrames frames;
+            FakeShell shell;
+            Workspace workspace(engine, shell);
+            int hidden = 0;
+            const auto settle = [&]
+                {
+                    for (int i = 0; i < 300 && workspace.Updates().Checking(); ++i)
+                    {
+                        ::Sleep(10);
+                        engine.Tick();
+                        frames.Frames(workspace, 1);
+                        hidden += !ShowsWindow("Update##workspace");
+                    }
+                    for (int i = 0; i < 5; ++i)
+                    {
+                        frames.Frames(workspace, 1);
+                        hidden += !ShowsWindow("Update##workspace");
+                    }
+                    CHECK_MSG(!workspace.Updates().Checking() && workspace.Updates().Available(), "the check against the local feed did not finish with a newer version");
+                };
+            workspace.Updates().CheckNow();
+            settle();
+            CHECK_MSG(ShowsWindow("Update##workspace"), "the update dialog did not open");
+            hidden = 0;
+            workspace.Updates().CheckNow();
+            settle();
+            CHECK_MSG(hidden == 0, "after a second check the update dialog was not drawn in " + std::to_string(hidden) + " frames");
+            const ImGuiContext& g = *ImGui::GetCurrentContext();
+            CHECK_MSG(g.OpenPopupStack.Size == 1, "popups open after a second check: " + std::to_string(g.OpenPopupStack.Size));
+            ::SetEnvironmentVariableW(L"MANIFOLD_UPDATE_FEED", nullptr);
+        }
+
+        // The record editor opened on record 5 of one table, then another table loaded: Apply must not write into record 5 of
         // the new table.
         void RecordEditorAfterTableReplaced()
         {
@@ -388,6 +433,7 @@ namespace Manifold::Tests
             DeleteConfirmAfterDrop();
             EditorAfterTableReplaced();
             AddToTableAfterNewTable();
+            UpdateDialogShownTwice();
             RecordEditorAfterTableReplaced();
             return Totals().Failures - before;
         }

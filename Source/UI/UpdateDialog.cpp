@@ -349,9 +349,11 @@ namespace Manifold::UI
         if (m_pendingOpen)
         {
             // another dialog first (the table script prompt, backups, About): this one waits
-            if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
+            const bool open = ImGui::IsPopupOpen(kPopup);
+            if (!open && ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
                 return;
-            ImGui::OpenPopup(kPopup);
+            if (!open)
+                ImGui::OpenPopup(kPopup);
             m_pendingOpen = false;
             // ∑ the required notice counts as shown once it is on screen; the next start offers Skip
             if (!m_skippable && m_engine.Options().UpdateSeen != m_shown->Version)
