@@ -787,7 +787,14 @@ namespace Manifold::Target
             const std::uint64_t handle = m_bridge.CallFn("mono_class_get_field_from_name", info.Handle, name).value_or(0);
             const std::uint64_t type = handle ? m_bridge.CallFn("mono_field_get_type", handle).value_or(0) : 0;
             const std::uint64_t klass = type ? m_bridge.CallFn("mono_class_from_mono_type", type).value_or(0) : 0;
+            const std::uint64_t before = m_bridge.m_failedCalls;
             m_bridge.DescribeValueType("mono_", klass, field);
+            if (m_bridge.m_failedCalls != before)
+            {
+                field.TypeHandle = 0;
+                field.ValueSize = 0;
+                field.TypeName.clear();
+            }
         }
         call.ResetScratch();
         if (m_bridge.m_failedCalls != failures)

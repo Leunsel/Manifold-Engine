@@ -575,6 +575,38 @@ namespace Manifold::Tests
             engine.CloseProcess();
         }
 
+        void CheckEnumStall(const std::filesystem::path& targetPath)
+        {
+            AgentTarget target;
+            const bool started = target.Start(targetPath, L"--mono-values");
+            CHECK_MSG(started, "could not start the test target with --mono-values");
+            if (!started)
+                return;
+            Settings settings;
+            Engine engine(settings);
+            const Status opened = engine.OpenProcess(MakeProcessId(target.Info.dwProcessId));
+            CHECK_MSG(opened.Ok(), opened.Text);
+            if (!opened)
+                return;
+            const Status mono = engine.Managed().Ensure();
+            CHECK_MSG(mono.Ok(), "enum stall: " + mono.Text);
+            if (!mono)
+                return;
+            const Target::Process& process = *engine.Process();
+            const std::string stem = std::filesystem::path(process.Name()).stem().string();
+            const std::uint64_t flag = engine.Evaluate(stem + ".g_monoEnumStall").value_or(0);
+            const std::int32_t stall = 1;
+            CHECK(flag && process.Write(flag, &stall, sizeof(stall)).Ok());
+            engine.Mono().TypedFieldsOf("Game.Mover");
+            ::Sleep(1500);
+            CHECK(flag && process.ReadValue<std::int32_t>(flag) == 0);
+            const std::vector<Target::MonoField> fields = engine.Mono().TypedFieldsOf("Game.Mover");
+            const auto team = std::find_if(fields.begin(), fields.end(), [](const Target::MonoField& field) { return field.Name == "team"; });
+            CHECK_MSG(team != fields.end() && team->TypeName == "Game.Team" && team->ValueSize == 4 && team->EnumCode == 0x08,
+                "team after an enum base read that stalled: " + (team != fields.end() ? "'" + team->TypeName + "' enum code " + std::to_string(team->EnumCode) : std::string("missing")));
+            engine.CloseProcess();
+        }
+
         void CheckChildDomain(const std::filesystem::path& targetPath)
         {
             AgentTarget target;
@@ -626,6 +658,7 @@ namespace Manifold::Tests
             CheckValueTypes(targetPath, L"--mono-values");
             CheckFrozenValueTypes(targetPath, false);
             CheckFrozenValueTypes(targetPath, true);
+            CheckEnumStall(targetPath);
             if (Target::ManagedDumperImage().empty())
             {
                 Skip("this build embedded no managed dumper, so the agent was not run in " + targetPath.filename().string());

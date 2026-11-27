@@ -573,7 +573,16 @@ extern "C"
     }
     __declspec(dllexport) int mono_class_is_valuetype(void* klass) { return static_cast<FakeClass*>(klass)->ValueType ? 1 : 0; }
     __declspec(dllexport) int mono_class_is_enum(void* klass) { return static_cast<FakeClass*>(klass)->EnumBase != 0 ? 1 : 0; }
-    __declspec(dllexport) void* mono_class_enum_basetype(void* klass) { return &static_cast<FakeClass*>(klass)->EnumBase; }
+    __declspec(dllexport) volatile long g_monoEnumStall = 0;
+    __declspec(dllexport) void* mono_class_enum_basetype(void* klass)
+    {
+        if (g_monoEnumStall)
+        {
+            g_monoEnumStall = 0;
+            ::Sleep(6000);
+        }
+        return &static_cast<FakeClass*>(klass)->EnumBase;
+    }
     __declspec(dllexport) int mono_class_value_size(void* klass, unsigned int* align)
     {
         if (align)
