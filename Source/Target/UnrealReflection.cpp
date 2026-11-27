@@ -482,10 +482,9 @@ namespace Manifold::Target
         }
         const std::string owner = NameOf(type).value_or("?");
         std::vector<std::uint8_t> block;
-        std::unordered_set<std::uint64_t> seen;
         while (chain.Next && chain.Nodes < maxNodes)
         {
-            if (!seen.insert(chain.Next).second)
+            if (!chain.Seen.insert(chain.Next).second)
             {
                 chain.Next = 0;
                 chain.Broken = true;
@@ -506,6 +505,8 @@ namespace Manifold::Target
             chain.Ended = next && *next == 0;
             chain.Broken = !chain.Ended && !chain.Next;
         }
+        if (chain.Ended || chain.Broken)
+            chain.Seen.clear();
         std::lock_guard lock(m_lock);
         OwnChain& slot = m_own[type];
         if (slot.Nodes <= chain.Nodes)

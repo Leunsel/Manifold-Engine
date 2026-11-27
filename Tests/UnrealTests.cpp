@@ -585,6 +585,13 @@ namespace Manifold::Tests
                 local field, problem = unreal.field("BigActor", "Missing")
                 if field ~= nil or problem == nil or problem.code ~= "ME-4205" then return "field: " .. tostring(problem and problem.code) end
                 return "ok")LUA");
+            run({ .BigClass = true, .BigFields = Target::UnrealRuntime::kMaxFields + 1, .LoopChain = true }, "lua chain that links back past the first read", Format(R"LUA(
+                local unreal = manifold.unreal
+                local first, cut = unreal.fields("BigActor")
+                if #first ~= %d or cut ~= false then return "first read: " .. #first .. ", complete " .. tostring(cut) end
+                local list, complete = unreal.fields("BigActor", false, %d)
+                if #list ~= %d or complete ~= false then return "read on: " .. #list .. ", complete " .. tostring(complete) end
+                return "ok")LUA", Target::UnrealRuntime::kMaxFields, 2 * Target::UnrealRuntime::kMaxFields, Target::UnrealRuntime::kMaxFields + 1));
             const int ceiling = 16 * Target::UnrealRuntime::kMaxFields;
             run({ .BigClass = true, .BigFields = ceiling + 1 }, "lua chain longer than the highest limit", Format(R"LUA(
                 local list, complete = manifold.unreal.fields("BigActor", false, math.maxinteger)

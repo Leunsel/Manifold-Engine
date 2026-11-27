@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Manifold
@@ -161,7 +162,8 @@ namespace Manifold::Target
 
     // A type's properties and how far their chains were read. Complete: every chain (the type's and its supers')
     // ended in a null link. Otherwise CanContinue tells the two cut cases apart: a chain stopped at the node limit
-    // and a read with a higher limit goes on from there, or a link could not be read and the definition stays cut.
+    // and a read with a higher limit goes on from there, or a link could not be read or leads back to an earlier
+    // node, and the definition stays cut.
     struct UnrealFieldList
     {
         std::vector<UnrealField> Fields;
@@ -358,6 +360,7 @@ namespace Manifold::Target
             int Nodes = 0;
             bool Ended = false;
             bool Broken = false;
+            std::unordered_set<std::uint64_t> Seen;
         };
         OwnChain OwnFields(std::uint64_t type, int maxNodes = kMaxFields) const;
         std::optional<UnrealField> DescribeWith(std::uint64_t property, const std::string& kind, const std::string& owner, const std::vector<std::uint8_t>* block) const;
