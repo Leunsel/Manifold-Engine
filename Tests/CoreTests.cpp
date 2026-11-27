@@ -2083,6 +2083,15 @@ hostileRan = true
             CHECK(Table::LoadTable(backup.LastFile(), loaded).Ok());
             CHECK_EQ(Backups::Versions(backup.SessionFolder()).size(), 2u);
 
+            const std::filesystem::path longSaved = Paths::DataFolder() / (std::wstring(90, L'a') + L".CT");
+            CHECK(engine.SaveTable(longSaved).Ok());
+            add(engine, "Long");
+            CHECK(backup.BackUpNow(&written).Ok() && written);
+            const std::filesystem::path longNamed = backup.LastFile();
+            engine.NewTable();
+            CHECK(engine.RestoreTable(longNamed).Ok());
+            CHECK_MSG(backup.SessionFolder() == longNamed.parent_path(), "restored into " + WideToUtf8(backup.SessionFolder().filename().wstring()));
+
             settings.BackupFolder = WideToUtf8((saved / L"below a file").wstring());
             add(engine, "Nowhere");
             const Status failed = backup.BackUpNow(&written);
