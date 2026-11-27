@@ -369,6 +369,9 @@ namespace Manifold::Table
             field.Display = EqualsNoCase(display, "hexadecimal") ? FieldDisplay::Hex : EqualsNoCase(display, "signed integer") ? FieldDisplay::Signed :
                 EqualsNoCase(display, "binary") ? FieldDisplay::Binary : FieldDisplay::Unsigned;
             field.ChildStructure = element.Attribute("ChildStruct").value_or("");
+            field.ChildStructStart = element.Attribute("ChildStructStart").value_or("");
+            field.BackgroundColor = element.Attribute("BackgroundColor").value_or("");
+            field.ExpandChangesAddress = element.Attribute("ExpandChangesAddress").value_or("");
             if (field.Type == Scan::ValueType::Binary)
             {
                 field.BitStart = static_cast<int>(std::clamp<std::int64_t>(ParseDecimal(element.Attribute("BitStart").value_or("0")).value_or(0), 0, 63));
@@ -384,7 +387,25 @@ namespace Manifold::Table
             return field;
         }
 
-        std::unique_ptr<StructDefinition> ReadStructure(const Xml::Node& node)
+        constexpr std::size_t kMaxRunFields = 0x10000;
+        constexpr std::size_t kMaxTableRunFields = 0x40000;
+
+        void AddElement(std::vector<StructField>& fields, const Xml::Node& element, std::size_t& room)
+        {
+            fields.push_back(ReadElement(element));
+            const StructField first = fields.back();
+            const std::int64_t count = ParseDecimal(element.Attribute("RLECount").value_or("1")).value_or(1);
+            for (std::int64_t i = 1; i < count && fields.size() < kMaxRunFields && room > 0; ++i, --room)
+            {
+                const std::int64_t offset = first.Offset + i * first.Size;
+                if (offset > kMaxFieldOffset)
+                    break;
+                fields.push_back(first);
+                fields.back().Offset = static_cast<int>(offset);
+            }
+        }
+
+        std::unique_ptr<StructDefinition> ReadStructure(const Xml::Node& node, std::size_t& room)
         {
             auto definition = std::make_unique<StructDefinition>();
             definition->Name = node.Attribute("Name").value_or("Structure");
@@ -392,7 +413,7 @@ namespace Manifold::Table
             if (!elements)
                 return definition;
             for (const Xml::Node* element : elements->ChildrenNamed("Element"))
-                definition->Fields.push_back(ReadElement(*element));
+                AddElement(definition->Fields, *element, room);
             definition->Sort();
             return definition;
         }
@@ -403,7 +424,10 @@ namespace Manifold::Table
             element.SetAttribute("Offset", std::to_string(field.Offset));
             element.SetAttribute("Vartype", !field.CustomType.empty() ? "Custom" : field.Type == Scan::ValueType::String && field.Unicode ? "Unicode String" : Scan::TableTypeName(field.Type));
             if (!field.CustomType.empty())
+            {
                 element.SetAttribute("CustomType", field.CustomType);
+                element.SetAttribute("Customtype", field.CustomType);
+            }
             element.SetAttribute("Bytesize", std::to_string(field.Size));
             element.SetAttribute("OffsetHex", Hex(static_cast<std::uint64_t>(field.Offset), 8));
             element.SetAttribute("Description", field.Name);
@@ -415,6 +439,12 @@ namespace Manifold::Table
             }
             if (!field.ChildStructure.empty())
                 element.SetAttribute("ChildStruct", field.ChildStructure);
+            if (!field.ChildStructStart.empty())
+                element.SetAttribute("ChildStructStart", field.ChildStructStart);
+            if (!field.BackgroundColor.empty())
+                element.SetAttribute("BackgroundColor", field.BackgroundColor);
+            if (!field.ExpandChangesAddress.empty())
+                element.SetAttribute("ExpandChangesAddress", field.ExpandChangesAddress);
             return element;
         }
     }
@@ -460,8 +490,9 @@ namespace Manifold::Table
         }
         if (const Xml::Node* structures = root.Child("Structures"))
         {
+            std::size_t room = kMaxTableRunFields;
             for (const Xml::Node* structure : structures->ChildrenNamed("Structure"))
-                table.Structures.push_back(ReadStructure(*structure));
+                table.Structures.push_back(ReadStructure(*structure, room));
         }
         table.LuaScript = root.ChildText("LuaScript");
         table.Comments = root.ChildText("Comments");
@@ -525,6 +556,16 @@ namespace Manifold::Table
                 AddressList::DisasmNote note;
                 note.Comment = entry->Text;
                 note.Header = entry->Attribute("Header").value_or("");
+                table.DisasmNotes[address] = std::move(note);
+            }
+            for (const Xml::Node* entry : comments->ChildrenNamed("DisassemblerComment"))
+            {
+                const std::string address = Trim(entry->ChildText("Address"));
+                if (address.empty())
+                    continue;
+                AddressList::DisasmNote note;
+                note.Comment = entry->ChildText("Comment");
+                note.Header = entry->ChildText("Header");
                 table.DisasmNotes[address] = std::move(note);
             }
         }
@@ -623,10 +664,12 @@ namespace Manifold::Table
             {
                 if (note.Comment.empty() && note.Header.empty())
                     continue;
-                Xml::Node& entry = node.Add("Comment", note.Comment);
-                entry.SetAttribute("Address", address);
+                Xml::Node& entry = node.Add("DisassemblerComment");
+                entry.Add("Address", address);
+                if (!note.Comment.empty())
+                    entry.Add("Comment", note.Comment);
                 if (!note.Header.empty())
-                    entry.SetAttribute("Header", note.Header);
+                    entry.Add("Header", note.Header);
             }
         }
         if (!list.TableLuaScript.empty())
@@ -685,7 +728,7 @@ namespace Manifold::Table
                 WriteNestedStructures(WriteElement(elements, inner), store, inner, written, depth + 1);
         }
 
-        void ReadNestedStructures(const Xml::Node& elements, PastedFields& pasted, std::set<std::string>& seen, int depth)
+        void ReadNestedStructures(const Xml::Node& elements, PastedFields& pasted, std::set<std::string>& seen, int depth, std::size_t& room)
         {
             if (depth > kMaxNestedStructures)
                 return;
@@ -694,11 +737,11 @@ namespace Manifold::Table
                 const Xml::Node* structure = element->Child("Structure");
                 if (!structure || static_cast<int>(pasted.Structures.size()) >= kMaxNestedStructures)
                     continue;
-                std::unique_ptr<StructDefinition> definition = ReadStructure(*structure);
+                std::unique_ptr<StructDefinition> definition = ReadStructure(*structure, room);
                 if (!seen.insert(Lower(definition->Name)).second)
                     continue;
                 if (const Xml::Node* inner = structure->Child("Elements"))
-                    ReadNestedStructures(*inner, pasted, seen, depth + 1);
+                    ReadNestedStructures(*inner, pasted, seen, depth + 1, room);
                 pasted.Structures.push_back(std::move(definition));
             }
         }
@@ -733,12 +776,13 @@ namespace Manifold::Table
         if (!elements || elements->Name != "Elements")
             return std::nullopt;
         PastedFields pasted;
+        std::size_t room = kMaxTableRunFields;
         for (const Xml::Node* element : elements->ChildrenNamed("Element"))
-            pasted.Fields.push_back(ReadElement(*element));
+            AddElement(pasted.Fields, *element, room);
         if (pasted.Fields.empty())
             return std::nullopt;
         std::set<std::string> seen;
-        ReadNestedStructures(*elements, pasted, seen, 0);
+        ReadNestedStructures(*elements, pasted, seen, 0, room);
         return pasted;
     }
 

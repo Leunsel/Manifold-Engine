@@ -39,6 +39,9 @@ namespace Manifold::Table
         std::string CustomType;
         int BitStart = 0;
         int BitLength = 1;
+        std::string ChildStructStart;
+        std::string BackgroundColor;
+        std::string ExpandChangesAddress;
 
         bool operator==(const StructField&) const = default;
     };

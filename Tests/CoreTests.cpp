@@ -459,6 +459,150 @@ namespace Manifold::Tests
             CHECK_MSG(Resave(again) == saved, "a second save changes the table");
         }
 
+        void TableDisassemblerComments()
+        {
+            const std::string input = "<CheatTable><CheatEntries/><DisassemblerComments>"
+                "<DisassemblerComment><Address>\"game.exe\"+20</Address><Comment>my note\n</Comment><Header>Combat</Header></DisassemblerComment>"
+                "<DisassemblerComment><Address>\"game.exe\"+30</Address><Header>Only header</Header></DisassemblerComment>"
+                "</DisassemblerComments></CheatTable>";
+            Table::LoadedTable loaded;
+            CHECK(Table::ParseTable(input, loaded).Ok());
+            CHECK_EQ(loaded.DisasmNotes.size(), 2u);
+            CHECK(loaded.DisasmNotes.count("\"game.exe\"+20") && loaded.DisasmNotes["\"game.exe\"+20"].Comment == "my note\n" &&
+                  loaded.DisasmNotes["\"game.exe\"+20"].Header == "Combat");
+            CHECK(loaded.DisasmNotes.count("\"game.exe\"+30") && loaded.DisasmNotes["\"game.exe\"+30"].Comment.empty() &&
+                  loaded.DisasmNotes["\"game.exe\"+30"].Header == "Only header");
+            const std::string saved = Resave(loaded);
+            Xml::ParseResult parsed = Xml::Parse(saved);
+            const Xml::Node* section = parsed.Root ? parsed.Root->Child("DisassemblerComments") : nullptr;
+            const std::vector<const Xml::Node*> entries = section ? section->ChildrenNamed("DisassemblerComment") : std::vector<const Xml::Node*>();
+            CHECK_MSG(entries.size() == 2, "disassembler comments not saved as Cheat Engine reads them: " + saved);
+            if (entries.size() == 2)
+            {
+                CHECK(entries[0]->ChildText("Address") == "\"game.exe\"+20" && entries[0]->ChildText("Comment") == "my note\n" && entries[0]->ChildText("Header") == "Combat");
+                CHECK(entries[1]->ChildText("Address") == "\"game.exe\"+30" && !entries[1]->HasChild("Comment") && entries[1]->ChildText("Header") == "Only header");
+            }
+
+            Table::LoadedTable older;
+            CHECK(Table::ParseTable("<CheatTable><DisassemblerComments><Comment Address=\"game.exe+1234\" Header=\"Old\">old note</Comment></DisassemblerComments></CheatTable>", older).Ok());
+            CHECK(older.DisasmNotes.count("game.exe+1234") && older.DisasmNotes["game.exe+1234"].Comment == "old note" && older.DisasmNotes["game.exe+1234"].Header == "Old");
+        }
+
+        void TableStructureCustomType()
+        {
+            Table::StructureStore structures;
+            Table::StructDefinition& player = structures.Add("Player");
+            player.Fields.push_back({ 0x8, "Purse", Scan::ValueType::Pointer, 8, Table::FieldDisplay::Hex, false, "Purse" });
+            player.Fields.push_back({ 0x10, "Gold", Scan::ValueType::ByteArray, 4, Table::FieldDisplay::Unsigned, false, "", "Obscured" });
+            structures.Add("Purse").Fields.push_back({ 0x4, "Coins", Scan::ValueType::ByteArray, 4, Table::FieldDisplay::Unsigned, false, "", "Obscured" });
+            const auto count = [](const std::string& text, const std::string& wanted)
+                {
+                    std::size_t found = 0;
+                    for (std::size_t at = text.find(wanted); at != std::string::npos; at = text.find(wanted, at + 1))
+                        ++found;
+                    return found;
+                };
+            const std::string saved = Table::WriteTable(Table::AddressList(), structures, {});
+            CHECK_MSG(count(saved, "Customtype=\"Obscured\"") == 2, "table save without Cheat Engine's Customtype: " + saved);
+            const std::string copied = Table::FieldsToXml(structures, player.Fields);
+            CHECK_MSG(count(copied, "Customtype=\"Obscured\"") == 2, "copied child structure without Cheat Engine's Customtype: " + copied);
+            Table::LoadedTable loaded;
+            CHECK(Table::ParseTable(saved, loaded).Ok() && loaded.Structures.size() == 2);
+            if (loaded.Structures.size() == 2)
+                CHECK(loaded.Structures[0]->Fields.size() == 2 && loaded.Structures[0]->Fields[1].CustomType == "Obscured" && loaded.Structures[1]->Fields[0].CustomType == "Obscured");
+        }
+
+        void TableStructureElementAttributes()
+        {
+            const std::string input = "<CheatTable><CheatEntries/><Structures StructVersion=\"2\">"
+                "<Structure Name=\"A\"><Elements>"
+                "<Element Offset=\"8\" Vartype=\"Pointer\" Bytesize=\"8\" ExpandChangesAddress=\"1\" DisplayMethod=\"unsigned integer\" ChildStructStart=\"16\" BackgroundColor=\"80FF80\" ChildStruct=\"B\"/>"
+                "</Elements></Structure>"
+                "<Structure Name=\"B\"><Elements><Element Offset=\"16\" Vartype=\"4 Bytes\" Bytesize=\"4\" Description=\"Ammo\" DisplayMethod=\"unsigned integer\"/></Elements></Structure>"
+                "</Structures></CheatTable>";
+            Table::LoadedTable loaded;
+            CHECK(Table::ParseTable(input, loaded).Ok());
+            const std::string saved = Resave(loaded);
+            Xml::ParseResult parsed = Xml::Parse(saved);
+            const Xml::Node* structures = parsed.Root ? parsed.Root->Child("Structures") : nullptr;
+            const std::vector<const Xml::Node*> list = structures ? structures->ChildrenNamed("Structure") : std::vector<const Xml::Node*>();
+            CHECK(list.size() == 2);
+            if (list.size() != 2)
+                return;
+            const Xml::Node* pointer = list[0]->Child("Elements") ? list[0]->Child("Elements")->Child("Element") : nullptr;
+            const Xml::Node* ammo = list[1]->Child("Elements") ? list[1]->Child("Elements")->Child("Element") : nullptr;
+            CHECK(pointer && ammo);
+            if (!pointer || !ammo)
+                return;
+            CHECK_MSG(pointer->Attribute("ChildStructStart") == std::optional<std::string>("16"), "ChildStructStart lost on save: " + saved);
+            CHECK_MSG(pointer->Attribute("BackgroundColor") == std::optional<std::string>("80FF80"), "BackgroundColor lost on save: " + saved);
+            CHECK_MSG(pointer->Attribute("ExpandChangesAddress") == std::optional<std::string>("1"), "ExpandChangesAddress lost on save: " + saved);
+            CHECK(!ammo->Attribute("ChildStructStart") && !ammo->Attribute("BackgroundColor") && !ammo->Attribute("ExpandChangesAddress"));
+        }
+
+        void TableStructureElementRuns()
+        {
+            const std::string input = "<CheatTable><CheatEntries/><Structures StructVersion=\"2\">"
+                "<Structure Name=\"A\"><Elements>"
+                "<Element Offset=\"0\" Vartype=\"Pointer\" Bytesize=\"4\" RLECount=\"2\" OffsetHex=\"00000000\" Description=\"Link\" DisplayMethod=\"unsigned integer\"/>"
+                "<Element Offset=\"8\" Vartype=\"4 Bytes\" Bytesize=\"4\" OffsetHex=\"00000008\" DisplayMethod=\"unsigned integer\"/>"
+                "</Elements></Structure>"
+                "<Structure Name=\"Huge\"><Elements>"
+                "<Element Offset=\"0\" Vartype=\"Byte\" Bytesize=\"1\" RLECount=\"999999999\" DisplayMethod=\"unsigned integer\"/>"
+                "</Elements></Structure>"
+                "<Structure Name=\"Edge\"><Elements>"
+                "<Element Offset=\"" + std::to_string(Table::kMaxFieldOffset - 4) + "\" Vartype=\"4 Bytes\" Bytesize=\"4\" RLECount=\"5\" DisplayMethod=\"unsigned integer\"/>"
+                "</Elements></Structure>"
+                "</Structures></CheatTable>";
+            Table::LoadedTable loaded;
+            CHECK(Table::ParseTable(input, loaded).Ok());
+            CHECK(loaded.Structures.size() == 3);
+            if (loaded.Structures.size() != 3)
+                return;
+            const std::vector<Table::StructField>& fields = loaded.Structures[0]->Fields;
+            CHECK_MSG(fields.size() == 3, "RLECount=2 read as " + std::to_string(fields.size()) + " fields with the element after it, 3 expected");
+            if (fields.size() == 3)
+            {
+                CHECK(fields[0].Offset == 0 && fields[1].Offset == 4 && fields[2].Offset == 8);
+                CHECK(fields[1].Type == Scan::ValueType::Pointer && fields[1].Size == 4 && fields[1].Name == "Link");
+                CHECK(fields[2].Type == Scan::ValueType::FourBytes && fields[2].Name.empty());
+            }
+            CHECK_MSG(loaded.Structures[1]->Fields.size() <= 0x10000, "RLECount=999999999 gave " + std::to_string(loaded.Structures[1]->Fields.size()) + " fields");
+            const std::vector<Table::StructField>& edge = loaded.Structures[2]->Fields;
+            CHECK_MSG(edge.size() == 2, "a run up to kMaxFieldOffset gave " + std::to_string(edge.size()) + " fields, 2 expected");
+            for (const Table::StructField& field : edge)
+                CHECK(field.Offset <= Table::kMaxFieldOffset);
+
+            std::string many = "<CheatTable><CheatEntries/><Structures StructVersion=\"2\">";
+            for (int i = 0; i < 8; ++i)
+                many += "<Structure Name=\"Huge" + std::to_string(i) + "\"><Elements><Element Offset=\"0\" Vartype=\"Byte\" Bytesize=\"1\" RLECount=\"999999999\" DisplayMethod=\"unsigned integer\"/></Elements></Structure>";
+            many += "</Structures></CheatTable>";
+            Table::LoadedTable manyLoaded;
+            CHECK(Table::ParseTable(many, manyLoaded).Ok());
+            std::size_t manyFields = 0;
+            for (const auto& structure : manyLoaded.Structures)
+                manyFields += structure->Fields.size();
+            CHECK_MSG(manyLoaded.Structures.size() == 8 && manyFields <= 0x40008, "8 structures with RLECount=999999999 gave " + std::to_string(manyFields) + " fields in all");
+
+            const std::string copied = "<Elements>"
+                "<Element Offset=\"0\" Vartype=\"Float\" Bytesize=\"4\" RLECount=\"3\" OffsetHex=\"00000000\" Description=\"Axis\" DisplayMethod=\"unsigned integer\"/>"
+                "<Element Offset=\"16\" Vartype=\"Pointer\" Bytesize=\"8\" OffsetHex=\"00000010\" DisplayMethod=\"unsigned integer\" ChildStruct=\"Inner\">"
+                "<Structure Name=\"Inner\"><Elements>"
+                "<Element Offset=\"0\" Vartype=\"4 Bytes\" Bytesize=\"4\" RLECount=\"2\" OffsetHex=\"00000000\" DisplayMethod=\"unsigned integer\"/>"
+                "</Elements></Structure></Element>"
+                "</Elements>";
+            const auto pasted = Table::FieldsFromXml(copied);
+            CHECK(pasted.has_value());
+            if (!pasted)
+                return;
+            CHECK_MSG(pasted->Fields.size() == 4, "pasted RLECount=3 gave " + std::to_string(pasted->Fields.size()) + " fields with the element after it, 4 expected");
+            if (pasted->Fields.size() == 4)
+                CHECK(pasted->Fields[2].Offset == 8 && pasted->Fields[2].Name == "Axis" && pasted->Fields[3].Offset == 16);
+            CHECK(pasted->Structures.size() == 1);
+            if (pasted->Structures.size() == 1)
+                CHECK_MSG(pasted->Structures[0]->Fields.size() == 2, "nested RLECount=2 gave " + std::to_string(pasted->Structures[0]->Fields.size()) + " fields");
+        }
+
         void AutoAssemblerOffline()
         {
             Asm::AaHost host;
@@ -2237,6 +2381,10 @@ hostileRan = true
         XmlParsing();
         TableRoundTrip();
         TableSectionsKept();
+        TableDisassemblerComments();
+        TableStructureCustomType();
+        TableStructureElementAttributes();
+        TableStructureElementRuns();
         AutoAssemblerOffline();
         CodeSearchHelpers();
         ScanKinds();
