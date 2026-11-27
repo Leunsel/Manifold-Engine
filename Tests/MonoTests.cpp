@@ -308,6 +308,25 @@ namespace Manifold::Tests
         engine.Tick();
     }
 
+    // A class first asked about while the worker cannot answer (every thread of the game
+    // held, as by a debugger break): once the worker runs again, the class has its members.
+    void CheckFrozenWorker(Engine& engine, const std::string& className, std::size_t methods, std::size_t fields)
+    {
+        Target::MonoBridge& bridge = engine.Mono();
+        const std::vector<Target::MonoClass> classes = bridge.Classes();
+        const auto unread = std::find_if(classes.begin(), classes.end(), [&](const Target::MonoClass& c) { return c.Name == className || c.FullName() == className; });
+        CHECK_MSG(unread != classes.end() && !unread->MembersLoaded, className + ": the class is missing or its members were read already");
+        const Target::Process& process = *engine.Process();
+        CHECK(process.Suspend());
+        const std::optional<Target::MonoClass> frozen = bridge.ClassDetails(className);
+        CHECK(process.Resume());
+        CHECK(frozen.has_value());
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        const std::optional<Target::MonoClass> after = bridge.ClassDetails(className);
+        CHECK_MSG(after && after->Methods.size() == methods && after->Fields.size() == fields,
+            className + Format(" after the worker ran again: %zu methods, %zu fields", after ? after->Methods.size() : 0, after ? after->Fields.size() : 0));
+    }
+
     void CheckMonoInBackground(Engine& engine)
     {
         const std::uint64_t generation = engine.Mono().Generation();
@@ -651,6 +670,8 @@ namespace Manifold::Tests
         CheckMonoInBackground(engine);
         CheckUnityFormat(engine);
         CheckClassVetting(engine);
+        CHECK(engine.Mono().Refresh().Ok());
+        CheckFrozenWorker(engine, "Player", 2, 2);
     }
 
     // Attaches to an already-running process and lists its Mono runtime. Only

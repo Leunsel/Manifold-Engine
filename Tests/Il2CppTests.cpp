@@ -26,6 +26,7 @@
 namespace Manifold::Tests
 {
     void SettleMono(Engine& engine, int milliseconds);
+    void CheckFrozenWorker(Engine& engine, const std::string& className, std::size_t methods, std::size_t fields);
 
     namespace
     {
@@ -906,6 +907,9 @@ namespace Manifold::Tests
         CHECK(bridge.Generation() != generation);
         CHECK_EQ(bridge.ClassCount(), 5u);
         CHECK(take != 0 && bridge.MethodNameAt(take) == std::optional<std::string>("Game.Player:TakeDamage"));
+        engine.Managed().Reload(true);
+        SettleMono(engine, 5000);
+        CheckFrozenWorker(engine, "Game.Player", 4, 3);
         engine.Managed().Stop();
     }
 

@@ -726,9 +726,11 @@ namespace Manifold::Target
         info.MembersLoaded = true;
         m_bridge.m_call.ResetScratch();
         const std::uint64_t methodIter = m_bridge.m_call.Scratch(8);
+        bool failed = false;
         for (int n = 0; n < kMaxMembers; ++n)
         {
             const auto method = m_bridge.CallFn("mono_class_get_methods", info.Handle, methodIter);
+            failed = failed || !method;
             if (!method || !*method)
                 break;
             MonoMethod entry;
@@ -740,6 +742,7 @@ namespace Manifold::Target
         for (int n = 0; n < kMaxMembers; ++n)
         {
             const auto field = m_bridge.CallFn("mono_class_get_fields", info.Handle, fieldIter);
+            failed = failed || !field;
             if (!field || !*field)
                 break;
             const std::uint32_t flags = static_cast<std::uint32_t>(m_bridge.CallFn("mono_field_get_flags", *field).value_or(0) & 0xFFFFFFFFu);
@@ -753,6 +756,12 @@ namespace Manifold::Target
             info.Fields.push_back(std::move(entry));
         }
         m_bridge.m_call.ResetScratch();
+        if (failed)
+        {
+            info.MembersLoaded = false;
+            info.Methods.clear();
+            info.Fields.clear();
+        }
     }
 
     void MonoRuntime::ResolveValueTypes(int classIndex)

@@ -418,7 +418,16 @@ namespace Manifold::Target
         // and a plausible name where the runtime keeps them), and IL2CPP never
         // frees class metadata, so the pointer cannot have gone stale.
         const std::uint64_t klass = info.Handle;
-        if (const auto parent = m_bridge.CallFn("il2cpp_class_get_parent", klass); parent && *parent)
+        const auto parent = m_bridge.CallFn("il2cpp_class_get_parent", klass);
+        bool failed = !parent && m_bridge.Fn("il2cpp_class_get_parent");
+        const auto forget = [&info]
+            {
+                info.MembersLoaded = false;
+                info.Parent.clear();
+                info.Methods.clear();
+                info.Fields.clear();
+            };
+        if (parent && *parent)
         {
             if (const auto known = m_bridge.m_handleIndex.find(*parent); known != m_bridge.m_handleIndex.end())
             {
@@ -433,7 +442,11 @@ namespace Manifold::Target
             }
         }
         if (m_bridge.Fn("il2cpp_class_is_generic"))
-            info.Generic = (m_bridge.CallFn("il2cpp_class_is_generic", klass).value_or(0) & 0xFFu) != 0;
+        {
+            const auto generic = m_bridge.CallFn("il2cpp_class_is_generic", klass);
+            failed = failed || !generic;
+            info.Generic = (generic.value_or(0) & 0xFFu) != 0;
+        }
 
         std::vector<RemoteCall::DrainItem> items;
         const std::uint64_t pointerFn = m_bridge.Fn("il2cpp_method_get_pointer");
@@ -451,12 +464,24 @@ namespace Manifold::Target
                 info.Methods.push_back(std::move(method));
             }
         }
+        else if (m_bridge.Fn("il2cpp_class_get_methods"))
+        {
+            failed = true;
+        }
+        if (failed)
+        {
+            forget();
+            return;
+        }
         // An open generic definition (List`1) has no field offsets of its own;
         // they depend on the type arguments of each instance.
         if (info.Generic || !m_bridge.Fn("il2cpp_class_get_fields"))
             return;
         if (!m_bridge.m_call.Drain(m_bridge.Fn("il2cpp_class_get_fields"), klass, items, RemoteCall::kNoPeek, 0, kMaxMembers))
+        {
+            forget();
             return;
+        }
         for (const RemoteCall::DrainItem& item : items)
         {
             const auto flags = static_cast<std::uint32_t>(m_bridge.CallFn("il2cpp_field_get_flags", item.Item).value_or(0) & 0xFFFFFFFFu);
