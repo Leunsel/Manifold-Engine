@@ -779,6 +779,8 @@ namespace
         }
         CONTEXT& context = *info->ContextRecord;
         const std::uint64_t dr6 = context.Dr6;
+        if ((dr6 & 0xF) == 0 && (context.Dr7 & 0xFF) == 0)
+            return EXCEPTION_CONTINUE_SEARCH;
         const DWORD tid = ::GetCurrentThreadId();
         MarkActive(tid);
         // A thread that traps while another one is stopping the process waits

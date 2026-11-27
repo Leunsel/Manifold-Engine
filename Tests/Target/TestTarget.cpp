@@ -4,6 +4,7 @@
 #include "FakeUnreal3.h"
 
 #include <windows.h>
+#include <intrin.h>
 
 #include <algorithm>
 #include <cstddef>
@@ -1329,6 +1330,41 @@ namespace
     }
 }
 
+extern "C" __declspec(dllexport) volatile long g_trapSteps = 0;
+extern "C" __declspec(dllexport) volatile long long g_trapDr6 = 0;
+
+namespace
+{
+    volatile DWORD g_trapThread = 0;
+
+    LONG CALLBACK CountTrapStep(EXCEPTION_POINTERS* info)
+    {
+        if (info->ExceptionRecord->ExceptionCode != EXCEPTION_SINGLE_STEP || ::GetCurrentThreadId() != g_trapThread)
+            return EXCEPTION_CONTINUE_SEARCH;
+        g_trapDr6 = static_cast<long long>(info->ContextRecord->Dr6);
+        info->ContextRecord->EFlags &= ~0x100u;
+        ::InterlockedIncrement(&g_trapSteps);
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+
+    DWORD WINAPI TrapFlagWorker(void*)
+    {
+        g_trapThread = ::GetCurrentThreadId();
+        for (;;)
+        {
+            __writeeflags(__readeflags() | 0x100);
+            __nop();
+            ::Sleep(10);
+        }
+    }
+
+    void StartTrapFlagProbe()
+    {
+        ::AddVectoredExceptionHandler(0, &CountTrapStep);
+        ::CloseHandle(::CreateThread(nullptr, 0, &TrapFlagWorker, nullptr, 0, nullptr));
+    }
+}
+
 extern "C" __declspec(dllexport) FakeRtti::Image g_rttiFake = {};
 extern "C" __declspec(dllexport) UnrealMarker g_unrealNames = { { 'M', 'F', 'U', 'E', 'P', 'O', 'O', 'L' }, &FakeUnreal::g_pool };
 extern "C" __declspec(dllexport) UnrealMarker g_unrealObjects = { { 'M', 'F', 'U', 'E', 'O', 'B', 'J', 'S' }, &FakeUnreal::g_objects };
@@ -1397,6 +1433,8 @@ int main(int argc, char** argv)
             StartSpeedProbe();
         else if (std::strcmp(argv[i], "--codefilter") == 0)
             StartCoverProbe();
+        else if (std::strcmp(argv[i], "--trap-flag") == 0)
+            StartTrapFlagProbe();
         else if (std::strcmp(argv[i], "--crash") == 0)
             ::SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);  // a crash ends the process at once, without the Windows dialog
         else if (std::strcmp(argv[i], "--mono-agent") == 0)

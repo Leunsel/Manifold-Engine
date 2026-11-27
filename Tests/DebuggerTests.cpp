@@ -417,9 +417,9 @@ namespace Manifold::Tests
             return std::filesystem::path(self).parent_path() / L"TestTarget.exe";
         }
 
-        bool StartTestTarget(PROCESS_INFORMATION& info, const std::filesystem::path& targetPath = TargetBesideTests())
+        bool StartTestTarget(PROCESS_INFORMATION& info, const std::filesystem::path& targetPath = TargetBesideTests(), const std::wstring& arguments = {})
         {
-            std::wstring command = L"\"" + targetPath.wstring() + L"\"";
+            std::wstring command = L"\"" + targetPath.wstring() + L"\"" + arguments;
             STARTUPINFOW startup{ sizeof(startup) };
             if (!::CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &info))
             {
@@ -883,6 +883,62 @@ namespace Manifold::Tests
         }
     }
 
+    void CheckForeignSingleStep(const std::filesystem::path& targetPath)
+    {
+        PROCESS_INFORMATION target{};
+        if (!StartTestTarget(target, targetPath, L" --trap-flag"))
+        {
+            CHECK_MSG(false, "could not start the test target for the foreign single step check");
+            return;
+        }
+        {
+            Settings settings;
+            settings.UseInProcessDebugger = true;
+            Engine engine(settings);
+            const Status opened = engine.OpenProcess(MakeProcessId(target.dwProcessId));
+            CHECK_MSG(opened.Ok(), opened.Text);
+            const std::uint64_t steps = opened ? engine.Evaluate("TestTarget.g_trapSteps").value_or(0) : 0;
+            const std::uint64_t dr6 = opened ? engine.Evaluate("TestTarget.g_trapDr6").value_or(0) : 0;
+            CHECK_MSG(steps && dr6, "foreign single step: no g_trapSteps in the target");
+            const auto count = [&]()
+                {
+                    long value = -1;
+                    engine.Process()->ReadExact(steps, &value, sizeof(value));
+                    return value;
+                };
+            const auto lastDr6 = [&]()
+                {
+                    long long value = -1;
+                    engine.Process()->ReadExact(dr6, &value, sizeof(value));
+                    return Hex(static_cast<std::uint64_t>(value));
+                };
+            const long first = steps ? count() : 0;
+            Wait(engine, 300);
+            const long alone = steps ? count() : 0;
+            CHECK_MSG(alone > first, "foreign single step: the target's own single steps did not arrive without a debugger (" + std::to_string(first) + " -> " +
+                std::to_string(alone) + ")");
+            const Status attached = steps ? engine.EnsureDebugger() : opened;
+            CHECK_MSG(attached.Ok(), attached.Text);
+            if (steps && attached)
+            {
+                CHECK(engine.Debugger().UsingVeh());
+                Wait(engine, 200);
+                const long before = count();
+                const std::string seen = lastDr6();
+                Wait(engine, 500);
+                const long after = count();
+                CHECK_MSG(after > before, "foreign single step: the target's own single steps stopped arriving while the in-process debugger was attached (" +
+                    std::to_string(before) + " -> " + std::to_string(after) + ", dr6 without a debugger " + seen + ")");
+                engine.Debugger().Detach();
+                Wait(engine, 400);
+            }
+        }
+        DWORD code = 0;
+        ::GetExitCodeProcess(target.hProcess, &code);
+        CHECK_MSG(code == STILL_ACTIVE, "foreign single step: the target ended with " + Hex(code, 8));
+        EndTestTarget(target, code);
+    }
+
     int RunVehDetachStress(const std::vector<std::string>& arguments)
     {
         int rounds = 20;
@@ -1105,6 +1161,7 @@ namespace Manifold::Tests
         EndTestTarget(info, code);
         CHECK_MSG(code == STILL_ACTIVE, "the target of the in-process debugger ended with " + Hex(code, 8));
         CheckHostExits(targetPath);
+        CheckForeignSingleStep(targetPath);
         return Totals().Failures - before;
     }
 }
