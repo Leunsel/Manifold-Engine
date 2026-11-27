@@ -1479,6 +1479,7 @@ namespace Manifold::Scan
                     std::vector<Segment> localSegments;
                     std::vector<Snapshot> localSnapshots;
                     std::vector<std::vector<std::uint32_t>> hits;
+                    std::vector<std::pair<std::size_t, std::size_t>> spans;
                     for (;;)
                     {
                         const std::size_t item = next.fetch_add(1);
@@ -1486,7 +1487,9 @@ namespace Manifold::Scan
                             break;
                         const WorkChunk& chunk = chunks[item];
                         const std::size_t readSize = static_cast<std::size_t>(chunk.ReadEnd - chunk.Base);
-                        if (readSize > buffer.size() || process->Read(chunk.Base, buffer.data(), readSize) == 0)
+                        if (readSize <= buffer.size() && !snapshotMode)
+                            ReadSpans(*process, chunk.Base, buffer.data(), readSize, spans);
+                        if (readSize > buffer.size() || (snapshotMode ? process->Read(chunk.Base, buffer.data(), readSize) == 0 : spans.empty()))
                         {
                             m_done += chunk.Size;
                             continue;
@@ -1515,19 +1518,23 @@ namespace Manifold::Scan
                         segment.File = index;
                         segment.Offset = file.Size();
                         const auto write = writer(file, record, segment);
-                        const std::size_t limit = readSize >= static_cast<std::size_t>(valueSize)
-                                                      ? static_cast<std::size_t>(std::min<std::uint64_t>(chunk.Size, readSize - static_cast<std::size_t>(valueSize) + 1))
-                                                      : 0;
                         const std::uint8_t* data = buffer.data();
-                        if (mixed)
+                        for (const auto& [from, to] : spans)
                         {
-                            auto emit = [&](std::uint32_t offset, ValueType type) { return write(chunk.Base + offset, type, data + offset, data + offset); };
-                            ScanTypes(typed, typed.Types, data, data, data, firstOffset, limit, static_cast<std::size_t>(alignment), hits, emit);
-                        }
-                        else
-                        {
-                            auto emit = [&](std::size_t offset) { return write(chunk.Base + offset, singleType, data + offset, data + offset); };
-                            matcher.Scan(data, data, data, firstOffset, limit, static_cast<std::size_t>(alignment), emit);
+                            const std::size_t begin = from + static_cast<std::size_t>((alignment - ((chunk.Base + from) % static_cast<std::uint64_t>(alignment))) % static_cast<std::uint64_t>(alignment));
+                            const std::size_t limit = to >= static_cast<std::size_t>(valueSize)
+                                                          ? static_cast<std::size_t>(std::min<std::uint64_t>(chunk.Size, to - static_cast<std::size_t>(valueSize) + 1))
+                                                          : 0;
+                            if (mixed)
+                            {
+                                auto emit = [&](std::uint32_t offset, ValueType type) { return write(chunk.Base + offset, type, data + offset, data + offset); };
+                                ScanTypes(typed, typed.Types, data, data, data, begin, limit, static_cast<std::size_t>(alignment), hits, emit);
+                            }
+                            else
+                            {
+                                auto emit = [&](std::size_t offset) { return write(chunk.Base + offset, singleType, data + offset, data + offset); };
+                                matcher.Scan(data, data, data, begin, limit, static_cast<std::size_t>(alignment), emit);
+                            }
                         }
                         if (segment.Count)
                             localSegments.push_back(segment);

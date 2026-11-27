@@ -316,6 +316,58 @@ namespace Manifold::Tests
                 Format("exact after unknown initial value from base + 1: %llu results", static_cast<unsigned long long>(found)));
         }
 
+        // ∑ A page that is readable when the scan lists the regions and unreadable when the worker reads it. The
+        //   shadow runs on the worker's read of the first page (its own region), after the listing and before
+        //   the read of the other two pages.
+        struct ProtectOnRead : Target::ByteShadow
+        {
+            std::uint64_t Trigger = 0;
+            std::uint8_t* Page = nullptr;
+            void Show(std::uint64_t address, std::uint8_t*, std::size_t) const override
+            {
+                DWORD old = 0;
+                if (address == Trigger)
+                    ::VirtualProtect(Page, Pages::kPage, PAGE_NOACCESS, &old);
+            }
+            void BeforeWrite(std::uint64_t, std::size_t) const override {}
+        };
+
+        void PageFailsAfterListing(const std::shared_ptr<Target::Process>& process)
+        {
+            Pages pages;
+            CHECK(pages.Data != nullptr);
+            if (!pages.Data)
+                return;
+            std::memset(pages.Data, 0x57, 3 * Pages::kPage);
+            const std::int32_t zero = 0;
+            std::memcpy(pages.Data + Pages::kPage + 0x100, &zero, sizeof(zero));
+            DWORD old = 0;
+            CHECK(::VirtualProtect(pages.Data, Pages::kPage, PAGE_READONLY, &old));
+            ScanOptions options;
+            options.Type = ValueType::FourBytes;
+            options.Value = "0";
+            options.Start = pages.At(0);
+            options.Stop = pages.At(3 * Pages::kPage);
+            options.Alignment = 4;
+            options.Writable = Tristate::Any;
+            options.Threads = 1;
+            const auto scan = [&]() -> std::uint64_t
+                {
+                    Scanner scanner;
+                    return scanner.Start(process, options, true) && Wait(scanner) ? scanner.Count() : ~0ull;
+                };
+            const std::uint64_t readable = scan();
+            CHECK_MSG(readable == 1, Format("exact 0 with every page readable: %llu results", static_cast<unsigned long long>(readable)));
+            auto shadow = std::make_shared<ProtectOnRead>();
+            shadow->Trigger = pages.At(0);
+            shadow->Page = pages.Data + 2 * Pages::kPage;
+            process->SetShadow(shadow);
+            const std::uint64_t failed = scan();
+            process->SetShadow(nullptr);
+            CHECK_MSG(failed == 1, Format("exact 0 with the last page unreadable after the listing: %llu results", static_cast<unsigned long long>(failed)));
+            CHECK(::VirtualProtect(pages.Data + 2 * Pages::kPage, Pages::kPage, PAGE_READWRITE, &old));
+        }
+
         int RunScanBufferTests()
         {
             const int before = Totals().Failures;
@@ -329,6 +381,7 @@ namespace Manifold::Tests
             UnreadablePages(process);
             ByteArrayNextScanWidth(process);
             UnalignedSnapshotStart(process);
+            PageFailsAfterListing(process);
             return Totals().Failures - before;
         }
     }
