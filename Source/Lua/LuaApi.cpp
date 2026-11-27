@@ -607,7 +607,8 @@ namespace Manifold::Lua
         int AutoAssemble(lua_State* state)
         {
             const char* script = luaL_checkstring(state, 1);
-            if (lua_toboolean(state, 2))
+            auto* given = static_cast<SharedMemory*>(luaL_testudata(state, 2, kDisableInfoType));
+            if (!given && lua_toboolean(state, 2))
             {
                 const std::string message = "autoAssemble: assembling into the program itself (targetself) is not supported";
                 LOG_WARN("Lua", message);
@@ -615,7 +616,8 @@ namespace Manifold::Lua
                 lua_pushstring(state, message.c_str());
                 return 2;
             }
-            auto* given = static_cast<SharedMemory*>(luaL_testudata(state, 3, kDisableInfoType));
+            if (!given)
+                given = static_cast<SharedMemory*>(luaL_testudata(state, 3, kDisableInfoType));
             const SharedMemory memory = given ? *given : std::make_shared<Asm::AaMemory>();
             const bool sections = Asm::HasSections(script);
             const Asm::AaSection section = !sections ? Asm::AaSection::Whole : given ? Asm::AaSection::Disable : Asm::AaSection::Enable;

@@ -1144,6 +1144,12 @@ namespace Manifold::Tests
                 if autoAssemble(script, false, info) ~= true then return "disable" end
                 if getAddressSafe("compatvalue") ~= nil or getAddressSafe("other") ~= nil then return "still registered" end
                 if readInteger(address) ~= nil then return "not freed" end
+                local again, info2 = autoAssemble(script)
+                if not again then return "enable again: " .. tostring(info2) end
+                local disabled, why = autoAssemble(script, info2)
+                if disabled ~= true then return "two-arg disable: " .. tostring(why) end
+                if getAddressSafe("compatvalue") ~= nil then return "still registered after the two-arg disable" end
+                if autoAssemble(script, true) ~= false then return "targetself accepted" end
                 return "ok")LUA", "integration", answer);
             CHECK_MSG(run.Ok() && answer == "ok", run.Ok() ? answer : run.Text);
         }
