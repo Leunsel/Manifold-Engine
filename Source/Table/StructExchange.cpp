@@ -1349,6 +1349,11 @@ namespace Manifold::Table
                     else
                     {
                         at = layout.Union ? 0 : AlignUp(layout.Offset, align);
+                        if (at >= kMaxFieldOffset)
+                        {
+                            Warn(line, Format("%s lies beyond the largest offset a dissect field can have (%X); it is left out", name.c_str(), kMaxFieldOffset));
+                            return;
+                        }
                         layout.UnitOffset = at;
                         layout.UnitSize = unit;
                         layout.UnitBits = 0;
@@ -1736,10 +1741,15 @@ namespace Manifold::Table
                             for (StructField field : nested.Definition.Fields)
                             {
                                 field.Offset += at;
+                                if (field.Offset >= kMaxFieldOffset)
+                                {
+                                    Warn(Peek().Line, Format("%s lies beyond the largest offset a dissect field can have (%X); it is left out", field.Name.c_str(), kMaxFieldOffset));
+                                    continue;
+                                }
                                 parsed.Definition.Fields.push_back(field);
                             }
                             if (!layout.Union)
-                                layout.Offset = at + nested.Size;
+                                layout.Offset = std::min(at + nested.Size, kMaxFieldOffset);
                             layout.UnionSize = std::max(layout.UnionSize, at + nested.Size);
                             layout.Align = std::max(layout.Align, align);
                             Accept(";");

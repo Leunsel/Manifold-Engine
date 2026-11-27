@@ -299,6 +299,9 @@ namespace Manifold::Tests
                 { "struct Inner { char x[0x8000000]; }; struct S { Inner a[20]; int b; };", 0x8000000, "a[1]", "a[2] lies beyond" },
                 { "struct C { int x; }; struct S { char p[0xFFFFFF0]; void (C::*a[8])(); };", 0xFFFFFF8, "a[1]", "a[2] lies beyond" },
                 { "struct Fwd; struct S { char p[0xFFFFFF8]; void (Fwd::*m)(); };", 0xFFFFFF8, "m", "m_thisAdjust lies beyond" },
+                { "struct S { char p[0xFFFFFFC]; int a : 3; int b : 3; char c : 1; };", 0xFFFFFFC, "b", "c lies beyond" },
+                { "struct S { char a[0x20000000]; int b : 3; };", 0, "a", "b lies beyond" },
+                { "struct S { char p[0xFFFFFF0]; struct { int x[8]; int y; }; };", 0xFFFFFFC, "x[3]", "x[4] lies beyond" },
             };
             for (const Case& test : kCases)
             {
