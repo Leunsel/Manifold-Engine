@@ -260,6 +260,7 @@ namespace Manifold::Target
         std::function<bool()> m_paused;
         mutable CheckedMutex m_lock;
         RemoteCall m_call;
+        std::uint64_t m_failedCalls = 0;
         std::unique_ptr<RuntimeBackend> m_backend;
         std::atomic<bool> m_present{ false };
         std::atomic<ManagedRuntime> m_runtime{ ManagedRuntime::None };

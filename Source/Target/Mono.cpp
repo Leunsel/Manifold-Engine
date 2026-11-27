@@ -161,7 +161,10 @@ namespace Manifold::Target
             return std::nullopt;
         std::uint64_t result = 0;
         if (!m_call.Call(fn, a0, a1, a2, a3, result))
+        {
+            ++m_failedCalls;
             return std::nullopt;
+        }
         return result;
     }
 

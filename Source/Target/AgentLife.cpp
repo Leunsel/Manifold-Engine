@@ -48,7 +48,7 @@ namespace Manifold::Target
     Status LoadAgent(const Process& process)
     {
         const bool is64Bit = process.Is64Bit();
-        const std::filesystem::path path = AgentFilePath(is64Bit);
+        std::filesystem::path path = AgentFilePath(is64Bit);
         const std::string name = AgentFileName(is64Bit);
         std::error_code ignore;
         if (!std::filesystem::exists(path, ignore))
@@ -68,9 +68,14 @@ namespace Manifold::Target
         {
             // the module list may be older than the agent's last unload: touch only a block that is still there
             Life::Block early{};
+            const_cast<Process&>(process).RefreshModules();
             const std::uint64_t at = process.FindExport(name, "ManifoldLife");
             if (at && process.ReadExact(at, &early, sizeof(early)) && early.Magic == Life::kMagic && early.Version == Life::kVersion)
+            {
                 touch(at);
+                if (const auto loaded = process.ModuleAt(at); loaded && !loaded->Path.empty())
+                    path = loaded->Path;
+            }
         }
         if (Status loaded = process.InjectLibrary(path.wstring()); !loaded)
             return loaded;

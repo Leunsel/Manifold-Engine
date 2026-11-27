@@ -355,10 +355,12 @@ namespace Manifold::Target
                 return buffer.Error();
             const Status written = process.Write(*buffer, bytes);
             const std::uint64_t status = call.Scratch(8);
-            const std::uint64_t opened = written && status
-                ? m_bridge.CallFn("mono_image_open_from_data", *buffer, bytes.size(), 1, status).value_or(0)
-                : 0;
-            process.Free(*buffer);
+            const std::optional<std::uint64_t> answer = written && status
+                ? m_bridge.CallFn("mono_image_open_from_data", *buffer, bytes.size(), 1, status)
+                : std::optional<std::uint64_t>(0);
+            const std::uint64_t opened = answer.value_or(0);
+            if (answer)
+                process.Free(*buffer);
             if (!opened)
             {
                 std::int32_t code = -1;
@@ -724,9 +726,11 @@ namespace Manifold::Target
         info.MembersLoaded = true;
         m_bridge.m_call.ResetScratch();
         const std::uint64_t methodIter = m_bridge.m_call.Scratch(8);
+        bool failed = false;
         for (int n = 0; n < kMaxMembers; ++n)
         {
             const auto method = m_bridge.CallFn("mono_class_get_methods", info.Handle, methodIter);
+            failed = failed || !method;
             if (!method || !*method)
                 break;
             MonoMethod entry;
@@ -738,6 +742,7 @@ namespace Manifold::Target
         for (int n = 0; n < kMaxMembers; ++n)
         {
             const auto field = m_bridge.CallFn("mono_class_get_fields", info.Handle, fieldIter);
+            failed = failed || !field;
             if (!field || !*field)
                 break;
             const std::uint32_t flags = static_cast<std::uint32_t>(m_bridge.CallFn("mono_field_get_flags", *field).value_or(0) & 0xFFFFFFFFu);
@@ -751,6 +756,12 @@ namespace Manifold::Target
             info.Fields.push_back(std::move(entry));
         }
         m_bridge.m_call.ResetScratch();
+        if (failed)
+        {
+            info.MembersLoaded = false;
+            info.Methods.clear();
+            info.Fields.clear();
+        }
     }
 
     void MonoRuntime::ResolveValueTypes(int classIndex)
@@ -758,12 +769,13 @@ namespace Manifold::Target
         if (classIndex < 0 || classIndex >= static_cast<int>(m_bridge.m_classes.size()))
             return;
         MonoClass& info = m_bridge.m_classes[static_cast<std::size_t>(classIndex)];
-        if (info.ValueTypesRead)
+        if (info.ValueTypesRead || !info.MembersLoaded)
             return;
         info.ValueTypesRead = true;
         if (!info.Handle || !m_bridge.Fn("mono_class_get_field_from_name") || !m_bridge.Fn("mono_class_from_mono_type"))
             return;
         RemoteCall& call = m_bridge.m_call;
+        const std::uint64_t failures = m_bridge.m_failedCalls;
         for (MonoField& field : info.Fields)
         {
             if (!MayBeValueType(field.TypeCode) || field.Name.empty() || field.TypeHandle)
@@ -775,9 +787,18 @@ namespace Manifold::Target
             const std::uint64_t handle = m_bridge.CallFn("mono_class_get_field_from_name", info.Handle, name).value_or(0);
             const std::uint64_t type = handle ? m_bridge.CallFn("mono_field_get_type", handle).value_or(0) : 0;
             const std::uint64_t klass = type ? m_bridge.CallFn("mono_class_from_mono_type", type).value_or(0) : 0;
+            const std::uint64_t before = m_bridge.m_failedCalls;
             m_bridge.DescribeValueType("mono_", klass, field);
+            if (m_bridge.m_failedCalls != before)
+            {
+                field.TypeHandle = 0;
+                field.ValueSize = 0;
+                field.TypeName.clear();
+            }
         }
         call.ResetScratch();
+        if (m_bridge.m_failedCalls != failures)
+            info.ValueTypesRead = false;
     }
 
     std::optional<std::string> MonoRuntime::ResolveHead(std::uint64_t header, bool allowRuntimeFallback)

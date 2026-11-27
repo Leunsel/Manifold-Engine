@@ -242,6 +242,7 @@ namespace
         Fail
     };
     AgentMode g_agentMode = AgentMode::Off;
+    bool g_openStall = false;
 
     const FakeMethod kAgentMethods[] = { { "Begin", nullptr }, { "Release", nullptr } };
     const FakeField kAgentFields[] = { { "State", 0, 0x08, 0x10 }, { "Types", 0, 0x08, 0x10 }, { "Cancel", 0, 0x08, 0x10 }, { "Data", 0, 0x18, 0x10 }, { "Size", 0, 0x08, 0x10 } };
@@ -407,6 +408,11 @@ extern "C"
     __declspec(dllexport) void* mono_image_open_from_data(char* data, unsigned int length, int needCopy, int* status)
     {
         static const char kName[] = "ManifoldDumper";
+        if (g_openStall)
+        {
+            g_openStall = false;
+            ::Sleep(6000);
+        }
         const bool dumper = g_agentMode != AgentMode::Off && data && needCopy && length > 0x200 && data[0] == 'M' && data[1] == 'Z'
             && std::search(data, data + length, kName, kName + sizeof(kName) - 1) != data + length;
         if (status)
@@ -567,7 +573,16 @@ extern "C"
     }
     __declspec(dllexport) int mono_class_is_valuetype(void* klass) { return static_cast<FakeClass*>(klass)->ValueType ? 1 : 0; }
     __declspec(dllexport) int mono_class_is_enum(void* klass) { return static_cast<FakeClass*>(klass)->EnumBase != 0 ? 1 : 0; }
-    __declspec(dllexport) void* mono_class_enum_basetype(void* klass) { return &static_cast<FakeClass*>(klass)->EnumBase; }
+    __declspec(dllexport) volatile long g_monoEnumStall = 0;
+    __declspec(dllexport) void* mono_class_enum_basetype(void* klass)
+    {
+        if (g_monoEnumStall)
+        {
+            g_monoEnumStall = 0;
+            ::Sleep(6000);
+        }
+        return &static_cast<FakeClass*>(klass)->EnumBase;
+    }
     __declspec(dllexport) int mono_class_value_size(void* klass, unsigned int* align)
     {
         if (align)
@@ -817,7 +832,16 @@ extern "C"
         return *slot;
     }
     __declspec(dllexport) const char* il2cpp_method_get_name(const FakeMethodInfo* method) { return method->Name; }
-    __declspec(dllexport) unsigned il2cpp_method_get_param_count(const FakeMethodInfo* method) { return method->ParamCount; }
+    __declspec(dllexport) volatile long g_il2cppMethodStall = 0;
+    __declspec(dllexport) unsigned il2cpp_method_get_param_count(const FakeMethodInfo* method)
+    {
+        if (g_il2cppMethodStall)
+        {
+            g_il2cppMethodStall = 0;
+            ::Sleep(6000);
+        }
+        return method->ParamCount;
+    }
     __declspec(dllexport) const FakeFieldInfo* il2cpp_class_get_fields(const FakeIl2CppClass* klass, void** iter)
     {
         if (!iter || !klass->FieldCount)
@@ -830,7 +854,16 @@ extern "C"
         return field;
     }
     __declspec(dllexport) const char* il2cpp_field_get_name(const FakeFieldInfo* field) { return field->Name; }
-    __declspec(dllexport) std::size_t il2cpp_field_get_offset(const FakeFieldInfo* field) { return static_cast<std::size_t>(field->Offset); }
+    __declspec(dllexport) volatile long g_il2cppFieldStall = 0;
+    __declspec(dllexport) std::size_t il2cpp_field_get_offset(const FakeFieldInfo* field)
+    {
+        if (g_il2cppFieldStall)
+        {
+            g_il2cppFieldStall = 0;
+            ::Sleep(6000);
+        }
+        return static_cast<std::size_t>(field->Offset);
+    }
     __declspec(dllexport) const FakeIl2CppType* il2cpp_field_get_type(const FakeFieldInfo* field) { return field->Type; }
     __declspec(dllexport) int il2cpp_field_get_flags(const FakeFieldInfo* field) { return field->Flags; }
     __declspec(dllexport) int il2cpp_type_get_type(const FakeIl2CppType* type) { return type->Type; }
@@ -1409,6 +1442,8 @@ int main(int argc, char** argv)
             g_agentMode = AgentMode::Unsure;
         else if (std::strcmp(argv[i], "--mono-agent=fail") == 0)
             g_agentMode = AgentMode::Fail;
+        else if (std::strcmp(argv[i], "--mono-open-stall") == 0)
+            g_openStall = true;
     }
     for (int i = 1; i < argc; ++i)
     {
