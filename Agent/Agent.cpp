@@ -407,6 +407,16 @@ namespace
             dr7 |= (1ull << 8) | (1ull << 9);
     }
 
+    bool Covers(std::uint64_t held, std::uint64_t armed, int slot)
+    {
+        const std::uint64_t lengths[4] = { 1, 2, 8, 4 };
+        const std::uint64_t heldType = (held >> (16 + slot * 4)) & 3;
+        const std::uint64_t armedType = (armed >> (16 + slot * 4)) & 3;
+        const std::uint64_t heldLength = lengths[(held >> (18 + slot * 4)) & 3];
+        const std::uint64_t armedLength = lengths[(armed >> (18 + slot * 4)) & 3];
+        return (heldType == armedType || (heldType == 1 && armedType == 3)) && heldLength <= armedLength;
+    }
+
     void MarkActive(DWORD threadId)
     {
         Recent& slot = g_recent[threadId % kRecentSlots];
@@ -639,6 +649,8 @@ namespace
                 return false;
             if (slot < static_cast<std::uint32_t>(kMaxWatches) && !block->Watches[slot].Active)
                 return false;
+            if (slot < static_cast<std::uint32_t>(kMaxWatches) && block->Actions[slot].ThreadId != 0 && block->Actions[slot].ThreadId != ::GetCurrentThreadId())
+                return false;
             if (slot == kSlotException && block->ExceptionMode == ExceptionNever)
                 return false;
         }
@@ -779,6 +791,8 @@ namespace
         }
         CONTEXT& context = *info->ContextRecord;
         const std::uint64_t dr6 = context.Dr6;
+        if ((dr6 & 0xF) == 0 && ((context.Dr7 & 0xFF) == 0 || (dr6 & 0x4000) != 0))
+            return EXCEPTION_CONTINUE_SEARCH;
         const DWORD tid = ::GetCurrentThreadId();
         MarkActive(tid);
         // A thread that traps while another one is stopping the process waits
@@ -790,12 +804,15 @@ namespace
         bool breakHit = false;
         std::uint64_t breakAddr = 0;
         std::uint32_t breakSlot = 0;
+        std::uint64_t addresses[4] = {};
+        std::uint64_t dr7 = 0;
+        BuildRegisters(block, addresses, dr7);
         for (int slot = 0; slot < kMaxWatches; ++slot)
         {
             const Watch& watch = block->Watches[slot];
             if (!watch.Active)
                 continue;
-            if (dr6 & (1ull << slot))
+            if ((dr6 & (1ull << slot)) && DebugAddress(context, slot) == watch.Address && Covers(context.Dr7, dr7, slot))
             {
                 if (Breaks(watch.Mode))
                 {
@@ -816,8 +833,6 @@ namespace
         }
         if (breakHit)
             EnterBreak(block, context, breakAddr, breakSlot);
-        std::uint64_t addresses[4] = {};
-        std::uint64_t dr7 = 0;
         BuildRegisters(block, addresses, dr7);
         SetDebugRegisters(context, addresses, dr7);
         context.EFlags |= kResumeFlag;

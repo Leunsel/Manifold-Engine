@@ -139,6 +139,8 @@ namespace Manifold::Debug
                     return Fail("\"" + Peek().Text + "\" does not belong there" + Where(Peek()));
                 if (m_code.size() > static_cast<std::size_t>(kMaxCode))
                     return Fail("it is too long (" + std::to_string(m_code.size()) + " bytes of code, at most " + std::to_string(kMaxCode) + ")");
+                if (m_deepest > kMaxStack)
+                    return Fail("it is nested too deeply (" + std::to_string(m_deepest) + " values at once, at most " + std::to_string(kMaxStack) + ")");
                 return Status::Success();
             }
 
@@ -324,17 +326,24 @@ namespace Manifold::Debug
 
             void Emit(std::uint8_t op) { m_code.push_back(op); }
 
+            void Push(std::uint8_t op)
+            {
+                Emit(op);
+                if (++m_depth > m_deepest)
+                    m_deepest = m_depth;
+            }
+
             void EmitConstant(std::int64_t value)
             {
                 if (value >= INT32_MIN && value <= INT32_MAX)
                 {
-                    Emit(OpInt32);
+                    Push(OpInt32);
                     const std::int32_t small = static_cast<std::int32_t>(value);
                     const auto* bytes = reinterpret_cast<const std::uint8_t*>(&small);
                     m_code.insert(m_code.end(), bytes, bytes + 4);
                     return;
                 }
-                Emit(OpInt);
+                Push(OpInt);
                 const auto* bytes = reinterpret_cast<const std::uint8_t*>(&value);
                 m_code.insert(m_code.end(), bytes, bytes + 8);
             }
@@ -346,7 +355,7 @@ namespace Manifold::Debug
                     EmitConstant(value.Int);
                     return;
                 }
-                Emit(OpFloat);
+                Push(OpFloat);
                 const auto* bytes = reinterpret_cast<const std::uint8_t*>(&value.Float);
                 m_code.insert(m_code.end(), bytes, bytes + 8);
             }
@@ -377,6 +386,7 @@ namespace Manifold::Debug
                     if (!(this->*next)())
                         return false;
                     Emit(found);
+                    --m_depth;
                 }
             }
 
@@ -486,20 +496,20 @@ namespace Manifold::Debug
                 {
                     if (reg->Only64 && !m_is64)
                         return Error(token.Text + " does not exist in a 32-bit process" + Where(token));
-                    Emit(OpRegister);
+                    Push(OpRegister);
                     Emit(reg->Index);
                     Emit(m_is64 ? reg->Part : (reg->Part == PartLow32 ? PartFull : reg->Part));
                     return true;
                 }
                 if (const FlagName* flag = FindFlag(token.Text))
                 {
-                    Emit(OpFlag);
+                    Push(OpFlag);
                     Emit(flag->Bit);
                     return true;
                 }
                 if (EqualsNoCase(token.Text, "THREADID"))
                 {
-                    Emit(OpThread);
+                    Push(OpThread);
                     return true;
                 }
                 if (EqualsNoCase(token.Text, "true") || EqualsNoCase(token.Text, "false") || EqualsNoCase(token.Text, "nil"))
@@ -553,6 +563,8 @@ namespace Manifold::Debug
             std::vector<std::uint8_t>& m_code;
             std::vector<Token> m_tokens;
             std::size_t m_at = 0;
+            int m_depth = 0;
+            int m_deepest = 0;
             Status m_error;
         };
 

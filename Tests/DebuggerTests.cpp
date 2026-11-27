@@ -6,6 +6,7 @@
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Debug/BreakAction.h"
+#include "Debug/Trace.h"
 
 #include <algorithm>
 #include <chrono>
@@ -267,6 +268,118 @@ namespace Manifold::Tests
         CHECK_MSG(process.Alive(), std::string(backend) + ": the target died");
     }
 
+    void CheckTraceOneThread(Engine& engine, bool veh)
+    {
+        Debug::Debugger& debugger = engine.Debugger();
+        const char* backend = veh ? "in-process" : "windows";
+        const std::uint64_t work = engine.Evaluate("TestTarget.Work").value_or(0);
+        CHECK_MSG(work, backend);
+        if (!work)
+            return;
+        Debug::TraceRequest request;
+        request.Address = work;
+        request.Count = 300;
+        request.StepOver = veh;
+        Debug::Tracer& tracer = engine.Tracer();
+        const Status started = tracer.Start(engine.Process(), engine.Disassembler(), request);
+        CHECK_MSG(started.Ok(), started.Text);
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(60000);
+        while (started && tracer.Running() && std::chrono::steady_clock::now() < until)
+            Wait(engine, 20);
+        CHECK_MSG(!tracer.Running(), std::string(backend) + ": the trace did not end, " + tracer.StatusText());
+        if (tracer.Running())
+            tracer.Stop();
+        const std::vector<Debug::TraceStep> steps = tracer.Steps();
+        CHECK_MSG(!steps.empty() && steps.front().Address == work, std::string(backend) + ": " + std::to_string(steps.size()) + " steps, " + tracer.StatusText());
+        std::vector<std::uint32_t> threads;
+        for (const Debug::TraceStep& step : steps)
+        {
+            if (std::find(threads.begin(), threads.end(), step.ThreadId) == threads.end())
+                threads.push_back(step.ThreadId);
+        }
+        std::string list;
+        for (std::uint32_t thread : threads)
+            list += " " + std::to_string(thread);
+        CHECK_MSG(threads.size() == 1, std::string(backend) + ": a trace of " + std::to_string(steps.size()) + " steps went through " + std::to_string(threads.size()) +
+            " threads:" + list);
+        CHECK_MSG(!debugger.Broken() && !debugger.HasBreakpoint(work), std::string(backend) + ": the trace left the process stopped or the breakpoint set");
+        if (debugger.Broken())
+            debugger.Resume(Debug::ResumeMode::Continue);
+        Wait(engine, 100);
+        CHECK_MSG(engine.Process()->Alive(), std::string(backend) + ": the target died");
+    }
+
+    void CheckSlotReuse(Engine& engine)
+    {
+        Debug::Debugger& debugger = engine.Debugger();
+        const std::uint64_t shared = engine.Evaluate("TestTarget.g_shared").value_or(0);
+        const std::uint64_t work = engine.Evaluate("TestTarget.Work").value_or(0);
+        const std::uint64_t quiet = engine.Evaluate("TestTarget.mfGapHigh").value_or(0);
+        const std::uint64_t idle = engine.Evaluate("TestTarget.mfTwin").value_or(0);
+        CHECK_MSG(shared && work && quiet && idle, "in-process, slot reuse");
+        if (!shared || !work || !quiet || !idle)
+            return;
+
+        {
+            int hot = 0;
+            CHECK(debugger.StartWatch(Debug::WatchKind::Writes, shared, 4, hot).Ok());
+            Wait(engine, 300);
+            debugger.StopWatch(hot);
+            int still = 0;
+            CHECK(debugger.StartWatch(Debug::WatchKind::Writes, quiet, 1, still).Ok());
+            Wait(engine, 300);
+            Debug::Watch before;
+            CHECK(debugger.CopyWatch(hot, before));
+            CHECK_MSG(!before.Entries.empty(), "in-process, slot reuse: the watch on g_shared saw no write");
+            Debug::Watch after;
+            CHECK(debugger.CopyWatch(still, after));
+            CHECK_MSG(after.Entries.empty(), "in-process, slot reuse: the watch on " + Hex(quiet) + ", which nothing writes, has " + std::to_string(after.Entries.size()) +
+                " writers, first " + (after.Entries.empty() ? std::string("-") : Hex(after.Entries.front().Instruction)));
+            debugger.RemoveWatch(still);
+            debugger.RemoveWatch(hot);
+        }
+
+        {
+            const std::uint64_t flag = engine.Evaluate("TestTarget.g_faultsOn").value_or(0);
+            CHECK_MSG(flag, "in-process, slot reuse: no g_faultsOn");
+            int read = 0;
+            CHECK(debugger.StartWatch(Debug::WatchKind::Accesses, flag, 4, read).Ok());
+            Wait(engine, 300);
+            debugger.StopWatch(read);
+            int written = 0;
+            CHECK(debugger.StartWatch(Debug::WatchKind::Writes, flag, 4, written).Ok());
+            Wait(engine, 300);
+            Debug::Watch before;
+            CHECK(debugger.CopyWatch(read, before));
+            CHECK_MSG(!before.Entries.empty(), "in-process, slot reuse: the watch on g_faultsOn saw no access");
+            Debug::Watch after;
+            CHECK(debugger.CopyWatch(written, after));
+            CHECK_MSG(after.Entries.empty(), "in-process, slot reuse: the writes watch on g_faultsOn, which only the workers read, has " + std::to_string(after.Entries.size()) +
+                " writers, first " + (after.Entries.empty() ? std::string("-") : Hex(after.Entries.front().Instruction)));
+            debugger.RemoveWatch(written);
+            debugger.RemoveWatch(read);
+        }
+
+        {
+            const std::uint64_t serial = debugger.Break().Serial;
+            const Status hot = debugger.SetBreakpoint(work, Debug::BreakpointType::Execute, 1, false, Action(engine, "RCX == 1", {}, true));
+            CHECK_MSG(hot.Ok(), hot.Text);
+            Wait(engine, 300);
+            CHECK(debugger.RemoveBreakpoint(work).Ok());
+            const Status set = debugger.SetBreakpoint(idle, Debug::BreakpointType::Execute, 1, false);
+            CHECK_MSG(set.Ok(), set.Text);
+            const bool broke = set && WaitForBreak(engine, serial, 1000);
+            const Debug::BreakInfo info = debugger.Break();
+            CHECK_MSG(!broke, "in-process, slot reuse: the breakpoint at " + Hex(idle) + ", which nothing calls, stopped at " + Hex(info.Address) + " for " +
+                Hex(info.BreakpointAddress));
+            CHECK(debugger.RemoveBreakpoint(idle).Ok());
+            if (broke)
+                debugger.Resume(Debug::ResumeMode::Continue);
+            Wait(engine, 100);
+        }
+        CHECK_MSG(engine.Process()->Alive(), "in-process, slot reuse: the target died");
+    }
+
     void CheckHostSilence(Engine& engine)
     {
         Debug::Debugger& debugger = engine.Debugger();
@@ -325,9 +438,9 @@ namespace Manifold::Tests
             return std::filesystem::path(self).parent_path() / L"TestTarget.exe";
         }
 
-        bool StartTestTarget(PROCESS_INFORMATION& info, const std::filesystem::path& targetPath = TargetBesideTests())
+        bool StartTestTarget(PROCESS_INFORMATION& info, const std::filesystem::path& targetPath = TargetBesideTests(), const std::wstring& arguments = {})
         {
-            std::wstring command = L"\"" + targetPath.wstring() + L"\"";
+            std::wstring command = L"\"" + targetPath.wstring() + L"\"" + arguments;
             STARTUPINFOW startup{ sizeof(startup) };
             if (!::CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &startup, &info))
             {
@@ -791,6 +904,261 @@ namespace Manifold::Tests
         }
     }
 
+    void CheckForeignSingleStep(const std::filesystem::path& targetPath)
+    {
+        PROCESS_INFORMATION target{};
+        if (!StartTestTarget(target, targetPath, L" --trap-flag"))
+        {
+            CHECK_MSG(false, "could not start the test target for the foreign single step check");
+            return;
+        }
+        {
+            Settings settings;
+            settings.UseInProcessDebugger = true;
+            Engine engine(settings);
+            const Status opened = engine.OpenProcess(MakeProcessId(target.dwProcessId));
+            CHECK_MSG(opened.Ok(), opened.Text);
+            const std::uint64_t steps = opened ? engine.Evaluate("TestTarget.g_trapSteps").value_or(0) : 0;
+            const std::uint64_t dr6 = opened ? engine.Evaluate("TestTarget.g_trapDr6").value_or(0) : 0;
+            CHECK_MSG(steps && dr6, "foreign single step: no g_trapSteps in the target");
+            const auto count = [&]()
+                {
+                    long value = -1;
+                    engine.Process()->ReadExact(steps, &value, sizeof(value));
+                    return value;
+                };
+            const auto lastDr6 = [&]()
+                {
+                    long long value = -1;
+                    engine.Process()->ReadExact(dr6, &value, sizeof(value));
+                    return Hex(static_cast<std::uint64_t>(value));
+                };
+            const long first = steps ? count() : 0;
+            Wait(engine, 300);
+            const long alone = steps ? count() : 0;
+            CHECK_MSG(alone > first, "foreign single step: the target's own single steps did not arrive without a debugger (" + std::to_string(first) + " -> " +
+                std::to_string(alone) + ")");
+            const Status attached = steps ? engine.EnsureDebugger() : opened;
+            CHECK_MSG(attached.Ok(), attached.Text);
+            if (steps && attached)
+            {
+                CHECK(engine.Debugger().UsingVeh());
+                Wait(engine, 200);
+                const long before = count();
+                const std::string seen = lastDr6();
+                Wait(engine, 500);
+                const long after = count();
+                CHECK_MSG(after > before, "foreign single step: the target's own single steps stopped arriving while the in-process debugger was attached (" +
+                    std::to_string(before) + " -> " + std::to_string(after) + ", dr6 without a debugger " + seen + ")");
+                const std::uint64_t quiet = engine.Evaluate("TestTarget.mfGapHigh").value_or(0);
+                int watch = 0;
+                CHECK(quiet && engine.Debugger().StartWatch(Debug::WatchKind::Writes, quiet, 1, watch).Ok());
+                Wait(engine, 400);
+                const long armed = count();
+                Wait(engine, 500);
+                const long later = count();
+                CHECK_MSG(later > armed, "foreign single step: the target's own single steps stopped arriving while a watch ran (" + std::to_string(armed) + " -> " +
+                    std::to_string(later) + ", last dr6 " + lastDr6() + ")");
+                engine.Debugger().RemoveWatch(watch);
+                engine.Debugger().Detach();
+                Wait(engine, 400);
+            }
+        }
+        DWORD code = 0;
+        ::GetExitCodeProcess(target.hProcess, &code);
+        CHECK_MSG(code == STILL_ACTIVE, "foreign single step: the target ended with " + Hex(code, 8));
+        EndTestTarget(target, code);
+    }
+
+    void CheckSlotKindChange(const std::filesystem::path& targetPath)
+    {
+        PROCESS_INFORMATION target{};
+        if (!StartTestTarget(target, targetPath, L" --write-probe"))
+        {
+            CHECK_MSG(false, "could not start the test target for the slot kind change check");
+            return;
+        }
+        {
+            Settings settings;
+            settings.UseInProcessDebugger = true;
+            Engine engine(settings);
+            const Status opened = engine.OpenProcess(MakeProcessId(target.dwProcessId));
+            CHECK_MSG(opened.Ok(), opened.Text);
+            const std::uint64_t probe = opened ? engine.Evaluate("TestTarget.g_writeProbe").value_or(0) : 0;
+            const std::uint64_t ask = opened ? engine.Evaluate("TestTarget.g_writeAsk").value_or(0) : 0;
+            const std::uint64_t done = opened ? engine.Evaluate("TestTarget.g_writeDone").value_or(0) : 0;
+            const std::uint64_t threadAt = opened ? engine.Evaluate("TestTarget.g_writeThread").value_or(0) : 0;
+            const bool found = probe && ask && done && threadAt;
+            CHECK_MSG(found, "slot kind change: no write probe in the target");
+            const Status attached = found ? engine.EnsureDebugger() : Status::Fail(ErrorCode::DebugNotAttached);
+            CHECK_MSG(attached.Ok(), attached.Text);
+            DWORD threadId = 0;
+            if (attached)
+                engine.Process()->ReadExact(threadAt, &threadId, sizeof(threadId));
+            HANDLE thread = threadId ? ::OpenThread(THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME, FALSE, threadId) : nullptr;
+            CHECK_MSG(!attached || thread, "slot kind change: could not open the probe thread");
+            Debug::Debugger& debugger = engine.Debugger();
+            long serial = 0;
+            const auto write = [&]()
+                {
+                    ++serial;
+                    engine.Process()->Write(ask, &serial, sizeof(serial));
+                    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(2000);
+                    while (std::chrono::steady_clock::now() < until)
+                    {
+                        long seen = 0;
+                        engine.Process()->ReadExact(done, &seen, sizeof(seen));
+                        if (seen == serial)
+                            return true;
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    }
+                    return false;
+                };
+            const auto held = [&]() -> std::uint64_t
+                {
+                    alignas(16) CONTEXT context{};
+                    context.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+                    bool read = false;
+                    if (::SuspendThread(thread) != static_cast<DWORD>(-1))
+                    {
+                        read = ::GetThreadContext(thread, &context) != FALSE;
+                        ::ResumeThread(thread);
+                    }
+                    const DWORD64 slots[4] = { context.Dr0, context.Dr1, context.Dr2, context.Dr3 };
+                    for (int slot = 0; read && slot < 4; ++slot)
+                    {
+                        if (slots[slot] == probe && (context.Dr7 & (1ull << (slot * 2))) != 0)
+                            return (context.Dr7 >> (16 + slot * 4)) & 0xF;
+                    }
+                    return 0xFF;
+                };
+            const auto count = [&](int id)
+                {
+                    Debug::Watch copy;
+                    std::uint64_t total = 0;
+                    if (debugger.CopyWatch(id, copy))
+                    {
+                        for (const Debug::WatchEntry& entry : copy.Entries)
+                            total += entry.Count;
+                    }
+                    return total;
+                };
+            struct Change
+            {
+                Debug::WatchKind Kind;
+                int Size;
+                const char* Name;
+            };
+            const Change changes[] = { { Debug::WatchKind::Accesses, 4, "writes to accesses" }, { Debug::WatchKind::Writes, 8, "size 4 to size 8" } };
+            for (const Change& change : changes)
+            {
+                bool stale = false;
+                for (int attempt = 0; thread && attempt < 5 && !stale; ++attempt)
+                {
+                    int before = 0;
+                    CHECK(debugger.StartWatch(Debug::WatchKind::Writes, probe, 4, before).Ok());
+                    Wait(engine, 300);
+                    const bool first = write();
+                    debugger.StopWatch(before);
+                    int after = 0;
+                    CHECK(debugger.StartWatch(change.Kind, probe, change.Size, after).Ok());
+                    const std::uint64_t nibble = held();
+                    const bool second = write();
+                    Wait(engine, 300);
+                    const std::uint64_t now = count(after);
+                    debugger.RemoveWatch(after);
+                    debugger.RemoveWatch(before);
+                    CHECK_MSG(first && second, std::string("slot kind change, ") + change.Name + ": the probe thread did not write");
+                    stale = nibble == 0xD;
+                    if (stale)
+                        CHECK_MSG(now == 1, std::string("slot kind change, ") + change.Name + ": the new watch counted " + std::to_string(now) +
+                            " hits for the one write of a thread that still held the old registers");
+                }
+                CHECK_MSG(!thread || stale, std::string("slot kind change, ") + change.Name + ": the probe thread never still held the old registers when the watch changed");
+            }
+            if (thread)
+                ::CloseHandle(thread);
+            if (attached)
+            {
+                debugger.Detach();
+                Wait(engine, 400);
+            }
+        }
+        DWORD code = 0;
+        ::GetExitCodeProcess(target.hProcess, &code);
+        CHECK_MSG(code == STILL_ACTIVE, "slot kind change: the target ended with " + Hex(code, 8));
+        EndTestTarget(target, code);
+    }
+
+    void CheckTraceUnderLoad(const std::filesystem::path& targetPath)
+    {
+        ::SetEnvironmentVariableW(L"MANIFOLD_STRESS_THREADS", L"64");
+        ::SetEnvironmentVariableW(L"MANIFOLD_NO_CHURN", L"1");
+        ::SetEnvironmentVariableW(L"MANIFOLD_STRESS_SLEEP", L"1");
+        PROCESS_INFORMATION target{};
+        const bool started = StartTestTarget(target, targetPath, L" --stress");
+        ::SetEnvironmentVariableW(L"MANIFOLD_STRESS_THREADS", nullptr);
+        ::SetEnvironmentVariableW(L"MANIFOLD_NO_CHURN", nullptr);
+        ::SetEnvironmentVariableW(L"MANIFOLD_STRESS_SLEEP", nullptr);
+        if (!started)
+        {
+            CHECK_MSG(false, "could not start the test target for the trace under load");
+            return;
+        }
+        {
+            Settings settings;
+            settings.UseInProcessDebugger = true;
+            Engine engine(settings);
+            const Status opened = engine.OpenProcess(MakeProcessId(target.dwProcessId));
+            CHECK_MSG(opened.Ok(), opened.Text);
+            const std::uint64_t touch = opened ? engine.Evaluate("TestTarget.Touch").value_or(0) : 0;
+            const Status attached = touch ? engine.EnsureDebugger() : Status::Fail(ErrorCode::DebugTraceFailed, "no TestTarget.Touch");
+            CHECK_MSG(attached.Ok(), attached.Text);
+            Debug::Tracer& tracer = engine.Tracer();
+            for (int round = 0; attached && round < 25; ++round)
+            {
+                Debug::TraceRequest request;
+                request.Address = touch;
+                request.Count = 40;
+                request.StepOver = true;
+                const Status traced = tracer.Start(engine.Process(), engine.Disassembler(), request);
+                CHECK_MSG(traced.Ok(), traced.Text);
+                const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(20000);
+                while (traced && tracer.Running() && std::chrono::steady_clock::now() < until)
+                    Wait(engine, 20);
+                if (tracer.Running())
+                    tracer.Stop();
+                std::vector<std::uint32_t> threads;
+                std::string list;
+                int index = 0;
+                for (const Debug::TraceStep& step : tracer.Steps())
+                {
+                    if (std::find(threads.begin(), threads.end(), step.ThreadId) == threads.end())
+                    {
+                        threads.push_back(step.ThreadId);
+                        list += " " + std::to_string(step.ThreadId) + " from step " + std::to_string(index) + " at " + (step.Address == touch ? std::string("Touch") : Hex(step.Address));
+                    }
+                    ++index;
+                }
+                CHECK_MSG(threads.size() == 1, "trace under load: trace " + std::to_string(round + 1) + " of " + std::to_string(tracer.Steps().size()) + " steps went through " +
+                    std::to_string(threads.size()) + " threads:" + list + ", " + tracer.StatusText());
+                if (threads.size() != 1)
+                    break;
+            }
+            if (attached)
+            {
+                if (engine.Debugger().Broken())
+                    engine.Debugger().Resume(Debug::ResumeMode::Continue);
+                engine.Debugger().Detach();
+                Wait(engine, 400);
+            }
+        }
+        DWORD code = 0;
+        ::GetExitCodeProcess(target.hProcess, &code);
+        CHECK_MSG(code == STILL_ACTIVE, "trace under load: the target ended with " + Hex(code, 8));
+        EndTestTarget(target, code);
+    }
+
     int RunVehDetachStress(const std::vector<std::string>& arguments)
     {
         int rounds = 20;
@@ -997,8 +1365,10 @@ namespace Manifold::Tests
                 CHECK(engine.Debugger().UsingVeh());
                 CheckBreakActions(engine, true);
                 CheckWatchesOnOneInstruction(engine, true);
+                CheckSlotReuse(engine);
                 CheckFpuAndExceptions(engine, true);
                 CheckStepOut(engine, true);
+                CheckTraceOneThread(engine, true);
                 CheckHostSilence(engine);
                 engine.Debugger().Detach();
                 Wait(engine, 400);
@@ -1011,6 +1381,9 @@ namespace Manifold::Tests
         EndTestTarget(info, code);
         CHECK_MSG(code == STILL_ACTIVE, "the target of the in-process debugger ended with " + Hex(code, 8));
         CheckHostExits(targetPath);
+        CheckForeignSingleStep(targetPath);
+        CheckSlotKindChange(targetPath);
+        CheckTraceUnderLoad(targetPath);
         return Totals().Failures - before;
     }
 }

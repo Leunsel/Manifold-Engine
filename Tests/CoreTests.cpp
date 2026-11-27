@@ -950,6 +950,20 @@ data:
             CHECK(!eval("readThing(RCX)"));
             CHECK(!eval("R8 == 1", false));
             CHECK(eval("EAX == 1", false).has_value());
+            const auto nested = [](int ones)
+                {
+                    std::string text = "1";
+                    for (int i = 1; i < ones; ++i)
+                        text = "1+(" + text + ")";
+                    return text;
+                };
+            CHECK_EQ(integer(nested(Program::kMaxStack)), static_cast<std::int64_t>(Program::kMaxStack));
+            {
+                std::vector<std::uint8_t> deepCode;
+                const Status deep = CompileExpression(nested(Program::kMaxStack + 1), true, resolve, deepCode);
+                CHECK_MSG(!deep && deep.Code == ErrorCode::DebugBadExpression, nested(Program::kMaxStack + 1) + " compiled to " + std::to_string(deepCode.size()) + " bytes, runs: " +
+                    (eval(nested(Program::kMaxStack + 1)).has_value() ? "yes" : "no"));
+            }
             std::vector<std::uint8_t> code;
             const Status bad = CompileExpression("RAX + ", true, resolve, code);
             CHECK(!bad && bad.Code == ErrorCode::DebugBadExpression && code.empty());

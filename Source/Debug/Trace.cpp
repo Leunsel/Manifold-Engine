@@ -109,6 +109,8 @@ namespace Manifold::Debug
             return;
         }
         m_waiting = false;
+        action.ThreadId = m_debugger.Break().ThreadId;
+        m_debugger.SetBreakpointAction(request.Address, action);
         {
             std::lock_guard lock(m_lock);
             m_status = "tracing";
