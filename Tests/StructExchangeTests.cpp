@@ -302,6 +302,8 @@ namespace Manifold::Tests
                 { "struct S { char p[0xFFFFFFC]; int a : 3; int b : 3; char c : 1; };", 0xFFFFFFC, "b", "c lies beyond" },
                 { "struct S { char p[0xFFFFFFC]; int a : 3; int b : 3; char c : 1; int d : 3; };", 0xFFFFFFC, "b", "d lies beyond" },
                 { "struct S { char a[0x20000000]; int b : 3; };", 0, "a", "b lies beyond" },
+                { "struct S { char p[0xFFFFFFD]; int a : 3; char b : 1; };", 0, "p", "b lies beyond" },
+                { "struct S { char p[0xFFFFFFD]; int a; char b; };", 0, "p", "b lies beyond" },
                 { "struct S { char p[0xFFFFFF0]; struct { int x[8]; int y; }; };", 0xFFFFFFC, "x[3]", "x[4] lies beyond" },
                 { "[StructLayout(LayoutKind.Explicit)] public struct S { [FieldOffset(0x8)] public int k; [FieldOffset(0xFFFFFFFF)] public int a; };", 8, "k", "a lies beyond" },
                 { "[StructLayout(LayoutKind.Explicit)] public struct S { [FieldOffset(0x8)] public int k; [FieldOffset(0x100000004)] public int a; };", 8, "k", "a lies beyond" },

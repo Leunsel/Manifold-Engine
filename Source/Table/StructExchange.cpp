@@ -1352,6 +1352,8 @@ namespace Manifold::Table
                         if (at >= kMaxFieldOffset)
                         {
                             layout.UnitOffset = -1;
+                            if (!layout.Union)
+                                layout.Offset = kMaxFieldOffset;
                             if (!name.empty())
                                 Warn(line, Format("%s lies beyond the largest offset a dissect field can have (%X); it is left out", name.c_str(), kMaxFieldOffset));
                             return;
@@ -1388,6 +1390,8 @@ namespace Manifold::Table
                 m_fieldOffset.reset();
                 if (at >= kMaxFieldOffset)
                 {
+                    if (!layout.Union)
+                        layout.Offset = kMaxFieldOffset;
                     Warn(line, Format("%s lies beyond the largest offset a dissect field can have (%X); it is left out", name.c_str(), kMaxFieldOffset));
                     return;
                 }
