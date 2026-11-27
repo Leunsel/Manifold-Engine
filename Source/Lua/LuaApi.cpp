@@ -735,11 +735,13 @@ namespace Manifold::Lua
             lua_setfield(state, -2, "Count");
             lua_pushcfunction(state, [](lua_State*) -> int { return 0; });
             lua_setfield(state, -2, "destroy");
-            lua_pushcfunction(state, [](lua_State* inner) -> int
+            lua_pushvalue(state, -1);
+            lua_pushcclosure(state, [](lua_State* inner) -> int
                 {
-                    lua_rawgeti(inner, 1, luaL_checkinteger(inner, 2));
+                    const int index = lua_rawequal(inner, 1, lua_upvalueindex(1)) ? 2 : 1;
+                    lua_rawgeti(inner, lua_upvalueindex(1), luaL_checkinteger(inner, index));
                     return 1;
-                });
+                }, 1);
             lua_setfield(state, -2, "getString");
             return 1;
         }

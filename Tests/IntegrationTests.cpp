@@ -81,6 +81,9 @@ namespace Manifold::Tests
             local hits = AOBScan(aob)
             if not hits or hits.Count ~= 1 then return 'the AOB is not unique: ' .. aob end
             if tonumber(hits[0], 16) + offset ~= damage then return 'the AOB does not lead to the address' end
+            local dotted, first = pcall(function() return hits.getString(0) end)
+            if not dotted or first ~= hits[0] then return 'dot getString: ' .. tostring(first) end
+            if hits:getString(0) ~= hits[0] then return 'colon getString' end
             hits.destroy()
             if getUniqueAOB(0x10) ~= nil then return 'an AOB for unreadable memory' end
             return 'ok|' .. aob .. '|' .. offset)LUA",
