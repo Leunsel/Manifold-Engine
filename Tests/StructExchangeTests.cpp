@@ -324,6 +324,10 @@ namespace Manifold::Tests
                 CHECK_MSG(inside && warned && At(s, test.LastOffset, test.Last), std::string(test.Text) + " -> " + Offsets(s));
             }
 
+            const StructImport sized = Import("[StructLayout(LayoutKind.Explicit, Size = 0x20)] public struct S { [FieldOffset(0)] public int k; [FieldOffset(0xFFFFFFFF)] public int a; };");
+            const StructDefinition* explicitSized = Named(sized.Structures, "S");
+            CHECK_MSG(explicitSized && explicitSized->Size() == 0x20, "explicit layout with Size = 0x20 and a field past the limit -> " + Offsets(explicitSized));
+
             const StructImport unnamed = Import("struct S { char a[0x20000000]; int : 3; };");
             const StructDefinition* s = Named(unnamed.Structures, "S");
             bool beyond = false;
