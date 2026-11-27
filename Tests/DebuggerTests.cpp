@@ -267,6 +267,56 @@ namespace Manifold::Tests
         CHECK_MSG(process.Alive(), std::string(backend) + ": the target died");
     }
 
+    void CheckSlotReuse(Engine& engine)
+    {
+        Debug::Debugger& debugger = engine.Debugger();
+        const std::uint64_t shared = engine.Evaluate("TestTarget.g_shared").value_or(0);
+        const std::uint64_t work = engine.Evaluate("TestTarget.Work").value_or(0);
+        const std::uint64_t quiet = engine.Evaluate("TestTarget.mfGapHigh").value_or(0);
+        const std::uint64_t idle = engine.Evaluate("TestTarget.mfTwin").value_or(0);
+        CHECK_MSG(shared && work && quiet && idle, "in-process, slot reuse");
+        if (!shared || !work || !quiet || !idle)
+            return;
+
+        {
+            int hot = 0;
+            CHECK(debugger.StartWatch(Debug::WatchKind::Writes, shared, 4, hot).Ok());
+            Wait(engine, 300);
+            debugger.StopWatch(hot);
+            int still = 0;
+            CHECK(debugger.StartWatch(Debug::WatchKind::Writes, quiet, 1, still).Ok());
+            Wait(engine, 300);
+            Debug::Watch before;
+            CHECK(debugger.CopyWatch(hot, before));
+            CHECK_MSG(!before.Entries.empty(), "in-process, slot reuse: the watch on g_shared saw no write");
+            Debug::Watch after;
+            CHECK(debugger.CopyWatch(still, after));
+            CHECK_MSG(after.Entries.empty(), "in-process, slot reuse: the watch on " + Hex(quiet) + ", which nothing writes, has " + std::to_string(after.Entries.size()) +
+                " writers, first " + (after.Entries.empty() ? std::string("-") : Hex(after.Entries.front().Instruction)));
+            debugger.RemoveWatch(still);
+            debugger.RemoveWatch(hot);
+        }
+
+        {
+            const std::uint64_t serial = debugger.Break().Serial;
+            const Status hot = debugger.SetBreakpoint(work, Debug::BreakpointType::Execute, 1, false, Action(engine, "RCX == 1", {}, true));
+            CHECK_MSG(hot.Ok(), hot.Text);
+            Wait(engine, 300);
+            CHECK(debugger.RemoveBreakpoint(work).Ok());
+            const Status set = debugger.SetBreakpoint(idle, Debug::BreakpointType::Execute, 1, false);
+            CHECK_MSG(set.Ok(), set.Text);
+            const bool broke = set && WaitForBreak(engine, serial, 1000);
+            const Debug::BreakInfo info = debugger.Break();
+            CHECK_MSG(!broke, "in-process, slot reuse: the breakpoint at " + Hex(idle) + ", which nothing calls, stopped at " + Hex(info.Address) + " for " +
+                Hex(info.BreakpointAddress));
+            CHECK(debugger.RemoveBreakpoint(idle).Ok());
+            if (broke)
+                debugger.Resume(Debug::ResumeMode::Continue);
+            Wait(engine, 100);
+        }
+        CHECK_MSG(engine.Process()->Alive(), "in-process, slot reuse: the target died");
+    }
+
     void CheckHostSilence(Engine& engine)
     {
         Debug::Debugger& debugger = engine.Debugger();
@@ -997,6 +1047,7 @@ namespace Manifold::Tests
                 CHECK(engine.Debugger().UsingVeh());
                 CheckBreakActions(engine, true);
                 CheckWatchesOnOneInstruction(engine, true);
+                CheckSlotReuse(engine);
                 CheckFpuAndExceptions(engine, true);
                 CheckStepOut(engine, true);
                 CheckHostSilence(engine);

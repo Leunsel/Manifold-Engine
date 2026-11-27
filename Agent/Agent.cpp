@@ -795,7 +795,7 @@ namespace
             const Watch& watch = block->Watches[slot];
             if (!watch.Active)
                 continue;
-            if (dr6 & (1ull << slot))
+            if ((dr6 & (1ull << slot)) && DebugAddress(context, slot) == watch.Address)
             {
                 if (Breaks(watch.Mode))
                 {
