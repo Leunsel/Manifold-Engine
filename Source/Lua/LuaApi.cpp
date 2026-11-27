@@ -957,6 +957,8 @@ namespace Manifold::Lua
             std::memcpy(&value, bytes, sizeof(T));
             if constexpr (std::is_floating_point_v<T>)
                 lua_pushnumber(state, static_cast<lua_Number>(value));
+            else if constexpr (sizeof(T) < sizeof(lua_Integer))
+                lua_pushinteger(state, lua_toboolean(state, 2) ? static_cast<lua_Integer>(static_cast<std::make_signed_t<T>>(value)) : static_cast<lua_Integer>(value));
             else
                 lua_pushinteger(state, static_cast<lua_Integer>(value));
             return 1;

@@ -82,6 +82,11 @@ namespace Manifold::Tests
                 package.loaded["oldstyletest.mod"] = nil
                 oldstyletest = nil
                 return "ok")LUA");
+            LuaCheck(engine, "signed byte tables", R"LUA(
+                if byteTableToDword({ 255, 255, 255, 255 }, true) ~= -1 then return "signed dword " .. tostring(byteTableToDword({ 255, 255, 255, 255 }, true)) end
+                if byteTableToWord({ 0, 128 }, true) ~= -32768 then return "signed word " .. tostring(byteTableToWord({ 0, 128 }, true)) end
+                if byteTableToDword({ 255, 255, 255, 255 }) ~= 4294967295 or byteTableToWord({ 0, 128 }) ~= 32768 then return "unsigned default" end
+                return "ok")LUA");
             LuaCheck(engine, "module with the loader's file name", R"LUA(
                 package.loaded.oldstyle2 = nil
                 local chunk = assert(loadstring("module(...)\nvalue = 7"))
