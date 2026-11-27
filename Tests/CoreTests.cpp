@@ -1730,6 +1730,24 @@ hostileRan = true
         std::filesystem::remove(path, ignored);
     }
 
+    void HighRecordIds()
+    {
+        const char* text = R"CT(<CheatTable><CheatEntries>
+<CheatEntry><ID>1337213022</ID><Description>"Group"</Description><GroupHeader>1</GroupHeader><CheatEntries>
+  <CheatEntry><ID>1337212707</ID><Description>"Value"</Description><VariableType>4 Bytes</VariableType><Address>1000</Address>
+    <Hotkeys><Hotkey><Action>Set Value</Action><Keys><Key>112</Key></Keys><Value>1</Value><ID>1337212708</ID></Hotkey></Hotkeys></CheatEntry>
+</CheatEntries></CheatEntry>
+</CheatEntries></CheatTable>)CT";
+        Table::LoadedTable loaded;
+        CHECK(Table::ParseTable(text, loaded).Ok() && loaded.Records.size() == 1);
+        if (loaded.Records.size() != 1 || loaded.Records[0]->Children.size() != 1)
+            return;
+        const Table::MemoryRecord& group = *loaded.Records[0];
+        const Table::MemoryRecord& value = *group.Children[0];
+        CHECK_MSG(group.Id == 1337213022 && value.Id == 1337212707, "IDs after load: " + std::to_string(group.Id) + ", " + std::to_string(value.Id));
+        CHECK_MSG(value.Hotkeys.size() == 1 && value.Hotkeys[0].Id == 1337212708, value.Hotkeys.empty() ? std::string("no hotkey") : "hotkey ID after load: " + std::to_string(value.Hotkeys[0].Id));
+    }
+
     void SharedRecordIds()
     {
         const char* text = R"CT(<CheatTable><CheatEntries>
@@ -2412,6 +2430,7 @@ hostileRan = true
         RecordIndex();
         ProfilerZones();
         HostileXml();
+        HighRecordIds();
         SharedRecordIds();
         HostileHotkeys();
         HostileFiles();

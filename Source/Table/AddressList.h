@@ -71,7 +71,7 @@ namespace Manifold::Table
 
     constexpr int kMaxRecordLength = 4096;
     constexpr int kMaxRecordDepth = 32;
-    constexpr int kMaxRecordId = 0x3FFFFFFF;
+    constexpr int kMaxRecordId = 0x6FFFFFFF;
     constexpr int kMaxHotkeyKeys = 5;
 
     struct MemoryRecord
