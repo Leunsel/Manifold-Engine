@@ -1163,7 +1163,7 @@ namespace Manifold::Table
                 {
                     int dimension = 0;
                     if (Peek().Kind == TokenKind::Number)
-                        dimension = static_cast<int>(std::min<std::int64_t>(Next().Value, kMaxFieldOffset));
+                        dimension = static_cast<int>(std::min<std::uint64_t>(Next().Value, kMaxFieldOffset));
                     else
                         Warn(line, "the length of " + result.Name + " is not a number");
                     while (!AtEnd() && !Is("]") && !Is(")"))
@@ -1619,7 +1619,7 @@ namespace Manifold::Table
                         {
                             int dimension = 0;
                             if (Peek().Kind == TokenKind::Number)
-                                dimension = static_cast<int>(std::min<std::int64_t>(Next().Value, kMaxFieldOffset));
+                                dimension = static_cast<int>(std::min<std::uint64_t>(Next().Value, kMaxFieldOffset));
                             else
                                 Warn(line, "the length of " + name + " is not a number");
                             while (!AtEnd() && !Is("]"))
@@ -1748,7 +1748,7 @@ namespace Manifold::Table
                                 {
                                     if (Peek().Kind == TokenKind::Number)
                                     {
-                                        const std::int64_t dimension = std::min<std::int64_t>(Next().Value, kMaxFieldOffset);
+                                        const std::int64_t dimension = std::min<std::uint64_t>(Next().Value, kMaxFieldOffset);
                                         count = static_cast<int>(std::min<std::int64_t>(count ? count * dimension : dimension, kMaxFieldOffset));
                                     }
                                     while (!AtEnd() && !Is("]"))

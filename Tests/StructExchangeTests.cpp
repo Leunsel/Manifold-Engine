@@ -256,6 +256,10 @@ namespace Manifold::Tests
                 "struct S { int a[0x100000001]; int b; };",
                 "struct S { struct Inner { int x; } a[65536][65537]; int b; };",
                 "struct S { void (*a[65536][65537])(); int b; };",
+                "struct S { int a[99999999999999999999]; int b; };",
+                "struct S { int a[3][0x8000000000000001]; int b; };",
+                "struct S { struct Inner { int x; } a[99999999999999999999]; int b; };",
+                "struct S { void (*a[99999999999999999999])(); int b; };",
             };
             for (const std::string_view text : kTexts)
             {
