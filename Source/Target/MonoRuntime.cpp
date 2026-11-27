@@ -775,6 +775,7 @@ namespace Manifold::Target
         if (!info.Handle || !m_bridge.Fn("mono_class_get_field_from_name") || !m_bridge.Fn("mono_class_from_mono_type"))
             return;
         RemoteCall& call = m_bridge.m_call;
+        const std::uint64_t failures = m_bridge.m_failedCalls;
         for (MonoField& field : info.Fields)
         {
             if (!MayBeValueType(field.TypeCode) || field.Name.empty() || field.TypeHandle)
@@ -789,6 +790,8 @@ namespace Manifold::Target
             m_bridge.DescribeValueType("mono_", klass, field);
         }
         call.ResetScratch();
+        if (m_bridge.m_failedCalls != failures)
+            info.ValueTypesRead = false;
     }
 
     std::optional<std::string> MonoRuntime::ResolveHead(std::uint64_t header, bool allowRuntimeFallback)

@@ -627,6 +627,7 @@ namespace Manifold::Tests
             CheckChildDomain(targetPath);
             CheckValueTypes(targetPath, L"--mono-values");
             CheckFrozenValueTypes(targetPath, false);
+            CheckFrozenValueTypes(targetPath, true);
             if (Target::ManagedDumperImage().empty())
             {
                 Skip("this build embedded no managed dumper, so the agent was not run in " + targetPath.filename().string());
