@@ -252,6 +252,34 @@ namespace Manifold::Tests
             CHECK(pages.Middle(PAGE_READWRITE));
         }
 
+        // Changed, Unchanged and Same as first after an eight-byte array scan compare all eight bytes, not four.
+        void ByteArrayNextScanWidth(const std::shared_ptr<Target::Process>& process)
+        {
+            Pages pages;
+            CHECK(pages.Data != nullptr);
+            if (!pages.Data)
+                return;
+            const std::uint8_t bytes[8] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+            ScanOptions options;
+            options.Type = ValueType::ByteArray;
+            options.Value = "01 02 03 04 05 06 07 08";
+            options.Start = pages.At(0);
+            options.Stop = pages.At(3 * Pages::kPage);
+            const std::pair<Compare, std::uint64_t> cases[] = { { Compare::Unchanged, 0 }, { Compare::Changed, 1 }, { Compare::SameAsFirst, 0 } };
+            for (const auto& [mode, expected] : cases)
+            {
+                std::memcpy(pages.Data + 0x100, bytes, sizeof(bytes));
+                Scanner scanner;
+                options.Mode = Compare::Exact;
+                const bool first = scanner.Start(process, options, true) && Wait(scanner);
+                CHECK_MSG(first && scanner.Count() == 1, Format("exact eight-byte array: %llu results", static_cast<unsigned long long>(scanner.Count())));
+                pages.Data[0x107] = 9;
+                const std::uint64_t kept = NextCount(process, scanner, options, mode);
+                CHECK_MSG(kept == expected, Format("next scan %s after byte eight changed: %llu kept, %llu expected", CompareName(mode), static_cast<unsigned long long>(kept),
+                                                   static_cast<unsigned long long>(expected)));
+            }
+        }
+
         int RunScanBufferTests()
         {
             const int before = Totals().Failures;
@@ -263,6 +291,7 @@ namespace Manifold::Tests
             PatternReads(*process);
             ValueReads(process);
             UnreadablePages(process);
+            ByteArrayNextScanWidth(process);
             return Totals().Failures - before;
         }
     }

@@ -143,6 +143,8 @@ namespace Manifold::Scan
                         m_mask = pattern->Mask;
                         m_size = static_cast<int>(m_patternA.size());
                     }
+                    else if (options.CustomSize > 0)
+                        m_size = options.CustomSize;
                     return Status::Success();
                 }
                 if (m_type == ValueType::String)
@@ -1159,7 +1161,7 @@ namespace Manifold::Scan
             effective.Kind = m_current->Kind;
             effective.Type = m_current->Type;
             effective.CustomName = m_current->CustomName;
-            if (effective.Kind == ScanKind::Custom)
+            if (effective.Kind == ScanKind::Custom || (effective.Kind == ScanKind::Single && effective.Type == ValueType::ByteArray))
                 effective.CustomSize = m_current->ValueSize;
             effective.BlockSize = effective.Kind == ScanKind::Grouped ? m_current->ValueSize : 0;
             if (effective.Against == CompareTo::Saved && CompareUsesPrevious(effective.Mode))
