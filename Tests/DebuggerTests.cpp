@@ -6,6 +6,7 @@
 #include "Core/RuntimeLog.h"
 #include "Core/Text.h"
 #include "Debug/BreakAction.h"
+#include "Debug/Trace.h"
 
 #include <algorithm>
 #include <chrono>
@@ -265,6 +266,47 @@ namespace Manifold::Tests
         debugger.SimulateMissingStepBits(false);
         Wait(engine, 100);
         CHECK_MSG(process.Alive(), std::string(backend) + ": the target died");
+    }
+
+    void CheckTraceOneThread(Engine& engine, bool veh)
+    {
+        Debug::Debugger& debugger = engine.Debugger();
+        const char* backend = veh ? "in-process" : "windows";
+        const std::uint64_t work = engine.Evaluate("TestTarget.Work").value_or(0);
+        CHECK_MSG(work, backend);
+        if (!work)
+            return;
+        Debug::TraceRequest request;
+        request.Address = work;
+        request.Count = 300;
+        request.StepOver = veh;
+        Debug::Tracer& tracer = engine.Tracer();
+        const Status started = tracer.Start(engine.Process(), engine.Disassembler(), request);
+        CHECK_MSG(started.Ok(), started.Text);
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(60000);
+        while (started && tracer.Running() && std::chrono::steady_clock::now() < until)
+            Wait(engine, 20);
+        CHECK_MSG(!tracer.Running(), std::string(backend) + ": the trace did not end, " + tracer.StatusText());
+        if (tracer.Running())
+            tracer.Stop();
+        const std::vector<Debug::TraceStep> steps = tracer.Steps();
+        CHECK_MSG(!steps.empty() && steps.front().Address == work, std::string(backend) + ": " + std::to_string(steps.size()) + " steps, " + tracer.StatusText());
+        std::vector<std::uint32_t> threads;
+        for (const Debug::TraceStep& step : steps)
+        {
+            if (std::find(threads.begin(), threads.end(), step.ThreadId) == threads.end())
+                threads.push_back(step.ThreadId);
+        }
+        std::string list;
+        for (std::uint32_t thread : threads)
+            list += " " + std::to_string(thread);
+        CHECK_MSG(threads.size() == 1, std::string(backend) + ": a trace of " + std::to_string(steps.size()) + " steps went through " + std::to_string(threads.size()) +
+            " threads:" + list);
+        CHECK_MSG(!debugger.Broken() && !debugger.HasBreakpoint(work), std::string(backend) + ": the trace left the process stopped or the breakpoint set");
+        if (debugger.Broken())
+            debugger.Resume(Debug::ResumeMode::Continue);
+        Wait(engine, 100);
+        CHECK_MSG(engine.Process()->Alive(), std::string(backend) + ": the target died");
     }
 
     void CheckSlotReuse(Engine& engine)
@@ -1050,6 +1092,7 @@ namespace Manifold::Tests
                 CheckSlotReuse(engine);
                 CheckFpuAndExceptions(engine, true);
                 CheckStepOut(engine, true);
+                CheckTraceOneThread(engine, true);
                 CheckHostSilence(engine);
                 engine.Debugger().Detach();
                 Wait(engine, 400);
