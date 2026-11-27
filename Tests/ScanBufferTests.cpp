@@ -368,6 +368,61 @@ namespace Manifold::Tests
             CHECK(::VirtualProtect(pages.Data + 2 * Pages::kPage, Pages::kPage, PAGE_READWRITE, &old));
         }
 
+        struct ProtectSteps : Target::ByteShadow
+        {
+            struct Step
+            {
+                std::uint64_t Trigger = 0;
+                std::uint8_t* Page = nullptr;
+                DWORD Protect = 0;
+            };
+            std::vector<Step> Steps;
+            void Show(std::uint64_t address, std::uint8_t*, std::size_t) const override
+            {
+                DWORD old = 0;
+                for (const Step& step : Steps)
+                {
+                    if (address == step.Trigger)
+                        ::VirtualProtect(step.Page, Pages::kPage, step.Protect, &old);
+                }
+            }
+            void BeforeWrite(std::uint64_t, std::size_t) const override {}
+        };
+
+        // ∑ Page 0 is its own region; pages 1-5 are one region when the scan lists them. Reading page 0 splits
+        //   them into page 1, pages 2-4 and an unreadable page 5, so the chunk falls back to its spans. Reading
+        //   page 1 then fails page 3, which the second listing still counts as part of the readable pages 2-4.
+        void MiddlePageFailsAfterListing(const std::shared_ptr<Target::Process>& process)
+        {
+            constexpr std::size_t kPage = Pages::kPage;
+            auto* data = static_cast<std::uint8_t*>(::VirtualAlloc(nullptr, 6 * kPage, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+            CHECK(data != nullptr);
+            if (!data)
+                return;
+            std::memset(data, 0x57, 6 * kPage);
+            const std::int32_t zero = 0;
+            std::memcpy(data + 4 * kPage + 0x100, &zero, sizeof(zero));
+            DWORD old = 0;
+            CHECK(::VirtualProtect(data, kPage, PAGE_READONLY, &old));
+            const auto at = [&](std::size_t page) { return reinterpret_cast<std::uint64_t>(data + page * kPage); };
+            auto shadow = std::make_shared<ProtectSteps>();
+            shadow->Steps = { { at(0), data + kPage, PAGE_READONLY }, { at(0), data + 5 * kPage, PAGE_NOACCESS }, { at(1), data + 3 * kPage, PAGE_NOACCESS } };
+            ScanOptions options;
+            options.Type = ValueType::FourBytes;
+            options.Value = "0";
+            options.Start = at(0);
+            options.Stop = at(6);
+            options.Alignment = 4;
+            options.Writable = Tristate::Any;
+            options.Threads = 1;
+            process->SetShadow(shadow);
+            Scanner scanner;
+            const std::uint64_t found = scanner.Start(process, options, true) && Wait(scanner) ? scanner.Count() : ~0ull;
+            process->SetShadow(nullptr);
+            CHECK_MSG(found == 1, Format("exact 0 with a middle page unreadable after the listing: %llu results", static_cast<unsigned long long>(found)));
+            ::VirtualFree(data, 0, MEM_RELEASE);
+        }
+
         int RunScanBufferTests()
         {
             const int before = Totals().Failures;
@@ -382,6 +437,7 @@ namespace Manifold::Tests
             ByteArrayNextScanWidth(process);
             UnalignedSnapshotStart(process);
             PageFailsAfterListing(process);
+            MiddlePageFailsAfterListing(process);
             return Totals().Failures - before;
         }
     }

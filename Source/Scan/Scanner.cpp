@@ -759,14 +759,20 @@ namespace Manifold::Scan
                 const std::uint64_t to = std::min(region.End(), address + size);
                 if (!region.Readable() || to <= from)
                     continue;
-                const std::size_t begin = static_cast<std::size_t>(from - address);
-                const std::size_t end = begin + process.Read(from, buffer + begin, static_cast<std::size_t>(to - from));
-                if (end == begin)
-                    continue;
-                if (!spans.empty() && spans.back().second == begin)
-                    spans.back().second = end;
-                else
-                    spans.emplace_back(begin, end);
+                const bool whole = process.ReadExact(from, buffer + (from - address), static_cast<std::size_t>(to - from));
+                for (std::uint64_t at = from; at < to;)
+                {
+                    const std::uint64_t stop = whole ? to : std::min(to, (at | 0xFFF) + 1);
+                    const std::size_t begin = static_cast<std::size_t>(at - address);
+                    const std::size_t end = static_cast<std::size_t>(stop - address);
+                    at = stop;
+                    if (!whole && !process.ReadExact(address + begin, buffer + begin, end - begin))
+                        continue;
+                    if (!spans.empty() && spans.back().second == begin)
+                        spans.back().second = end;
+                    else
+                        spans.emplace_back(begin, end);
+                }
             }
         }
 
