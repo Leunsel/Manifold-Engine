@@ -639,6 +639,8 @@ namespace
                 return false;
             if (slot < static_cast<std::uint32_t>(kMaxWatches) && !block->Watches[slot].Active)
                 return false;
+            if (slot < static_cast<std::uint32_t>(kMaxWatches) && block->Actions[slot].ThreadId != 0 && block->Actions[slot].ThreadId != ::GetCurrentThreadId())
+                return false;
             if (slot == kSlotException && block->ExceptionMode == ExceptionNever)
                 return false;
         }

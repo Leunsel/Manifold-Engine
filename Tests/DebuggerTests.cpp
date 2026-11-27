@@ -970,6 +970,75 @@ namespace Manifold::Tests
         EndTestTarget(target, code);
     }
 
+    void CheckTraceUnderLoad(const std::filesystem::path& targetPath)
+    {
+        ::SetEnvironmentVariableW(L"MANIFOLD_STRESS_THREADS", L"64");
+        ::SetEnvironmentVariableW(L"MANIFOLD_NO_CHURN", L"1");
+        ::SetEnvironmentVariableW(L"MANIFOLD_STRESS_SLEEP", L"1");
+        PROCESS_INFORMATION target{};
+        const bool started = StartTestTarget(target, targetPath, L" --stress");
+        ::SetEnvironmentVariableW(L"MANIFOLD_STRESS_THREADS", nullptr);
+        ::SetEnvironmentVariableW(L"MANIFOLD_NO_CHURN", nullptr);
+        ::SetEnvironmentVariableW(L"MANIFOLD_STRESS_SLEEP", nullptr);
+        if (!started)
+        {
+            CHECK_MSG(false, "could not start the test target for the trace under load");
+            return;
+        }
+        {
+            Settings settings;
+            settings.UseInProcessDebugger = true;
+            Engine engine(settings);
+            const Status opened = engine.OpenProcess(MakeProcessId(target.dwProcessId));
+            CHECK_MSG(opened.Ok(), opened.Text);
+            const std::uint64_t touch = opened ? engine.Evaluate("TestTarget.Touch").value_or(0) : 0;
+            const Status attached = touch ? engine.EnsureDebugger() : Status::Fail(ErrorCode::DebugTraceFailed, "no TestTarget.Touch");
+            CHECK_MSG(attached.Ok(), attached.Text);
+            Debug::Tracer& tracer = engine.Tracer();
+            for (int round = 0; attached && round < 25; ++round)
+            {
+                Debug::TraceRequest request;
+                request.Address = touch;
+                request.Count = 40;
+                request.StepOver = true;
+                const Status traced = tracer.Start(engine.Process(), engine.Disassembler(), request);
+                CHECK_MSG(traced.Ok(), traced.Text);
+                const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(20000);
+                while (traced && tracer.Running() && std::chrono::steady_clock::now() < until)
+                    Wait(engine, 20);
+                if (tracer.Running())
+                    tracer.Stop();
+                std::vector<std::uint32_t> threads;
+                std::string list;
+                int index = 0;
+                for (const Debug::TraceStep& step : tracer.Steps())
+                {
+                    if (std::find(threads.begin(), threads.end(), step.ThreadId) == threads.end())
+                    {
+                        threads.push_back(step.ThreadId);
+                        list += " " + std::to_string(step.ThreadId) + " from step " + std::to_string(index) + " at " + (step.Address == touch ? std::string("Touch") : Hex(step.Address));
+                    }
+                    ++index;
+                }
+                CHECK_MSG(threads.size() == 1, "trace under load: trace " + std::to_string(round + 1) + " of " + std::to_string(tracer.Steps().size()) + " steps went through " +
+                    std::to_string(threads.size()) + " threads:" + list + ", " + tracer.StatusText());
+                if (threads.size() != 1)
+                    break;
+            }
+            if (attached)
+            {
+                if (engine.Debugger().Broken())
+                    engine.Debugger().Resume(Debug::ResumeMode::Continue);
+                engine.Debugger().Detach();
+                Wait(engine, 400);
+            }
+        }
+        DWORD code = 0;
+        ::GetExitCodeProcess(target.hProcess, &code);
+        CHECK_MSG(code == STILL_ACTIVE, "trace under load: the target ended with " + Hex(code, 8));
+        EndTestTarget(target, code);
+    }
+
     int RunVehDetachStress(const std::vector<std::string>& arguments)
     {
         int rounds = 20;
@@ -1193,6 +1262,7 @@ namespace Manifold::Tests
         CHECK_MSG(code == STILL_ACTIVE, "the target of the in-process debugger ended with " + Hex(code, 8));
         CheckHostExits(targetPath);
         CheckForeignSingleStep(targetPath);
+        CheckTraceUnderLoad(targetPath);
         return Totals().Failures - before;
     }
 }
