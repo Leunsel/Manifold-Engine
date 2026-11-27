@@ -253,6 +253,59 @@ namespace Manifold::Tests
             CHECK_MSG(target.Alive(), what + ": the game ended when the agent unloaded");
         }
 
+        // An agent from another folder is in the game already, from a Manifold that runs from there:
+        // the load must be counted by the copy the game holds it in, or that copy frees itself once too often.
+        void CheckOtherCopy(const std::filesystem::path& path, const char* label)
+        {
+            const std::string what = std::string(label) + " agent from another folder";
+            Child target;
+            if (!Launch(path, L"--crash", target))
+            {
+                Skip("the test target " + path.string() + " could not be started");
+                return;
+            }
+            Result<std::shared_ptr<Target::Process>> opened = Target::Process::Open(MakeProcessId(target.Info.dwProcessId));
+            CHECK_MSG(opened.Ok(), what + ": the test target could not be opened");
+            if (!opened)
+                return;
+            Target::Process& process = **opened;
+            const bool started = WaitFor(5000, [&] { process.RefreshModules(); return process.FindExport("kernel32.dll", "LoadLibraryW") != 0; });
+            CHECK_MSG(started, what + ": the test target did not finish starting");
+            if (!started)
+                return;
+            const std::string name = Target::AgentFileName(process.Is64Bit());
+            const std::filesystem::path folder = std::filesystem::temp_directory_path() / ("Manifold-AgentCopy-" + std::to_string(target.Info.dwProcessId));
+            const std::filesystem::path copy = folder / name;
+            std::error_code error;
+            std::filesystem::create_directories(folder, error);
+            const bool copied = std::filesystem::copy_file(Target::AgentFilePath(process.Is64Bit()), copy, std::filesystem::copy_options::overwrite_existing, error);
+            CHECK_MSG(copied, what + ": the agent could not be copied to " + copy.string());
+            // the other Manifold loads its copy through its own handle, so this one's module list does not show it yet
+            Result<std::shared_ptr<Target::Process>> other = Target::Process::Open(MakeProcessId(target.Info.dwProcessId));
+            const Status injected = copied && other ? (*other)->InjectLibrary(copy.wstring()) : Status::Fail(ErrorCode::InjectFailed);
+            CHECK_MSG(injected.Ok(), what + ": " + injected.Text);
+            const std::uint64_t block = injected ? (*other)->FindExport(name, "ManifoldLife") : 0;
+            CHECK_MSG(block != 0, what + ": the copy has no life block");
+            if (block)
+            {
+                const std::uint32_t one = 1;
+                const std::uint64_t now = ::GetTickCount64();
+                CHECK((*other)->Write(block + offsetof(Target::Life::Block, HostLoads), &one, sizeof(one)).Ok());
+                CHECK((*other)->Write(block + offsetof(Target::Life::Block, Activity), &now, sizeof(now)).Ok());
+                const Status loaded = Target::LoadAgent(process);
+                CHECK_MSG(loaded.Ok(), what + ": " + loaded.Text);
+                WaitFor(static_cast<int>(kGrace) + 1500, [&] { return !target.Alive(); });
+                DWORD code = 0;
+                ::GetExitCodeProcess(target.Info.hProcess, &code);
+                CHECK_MSG(target.Alive(), what + Format(": the game ended with 0x%08X", static_cast<unsigned>(code)));
+                if (target.Alive())
+                    CHECK_MSG(Unloads(target.Info.dwProcessId, static_cast<int>(kGrace) + 3000), what + ": the agent stayed although no part needs it");
+            }
+            target.End();
+            std::filesystem::remove(copy, error);
+            std::filesystem::remove(folder, error);
+        }
+
         int RunAgentHost(const std::vector<std::string>& arguments)
         {
             if (arguments.size() < 3)
@@ -281,6 +334,7 @@ namespace Manifold::Tests
             for (const auto& [path, label] : { std::pair{ target, "64-bit" }, std::pair{ target.parent_path() / L"TestTarget32.exe", "32-bit" } })
             {
                 CheckCountedLoad(path, label);
+                CheckOtherCopy(path, label);
                 for (const Part part : { Part::Crash, Part::Speed, Part::Cover })
                 {
                     CheckNormalEnd(path, label, part);
