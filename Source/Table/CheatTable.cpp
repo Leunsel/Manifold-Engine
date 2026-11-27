@@ -369,6 +369,9 @@ namespace Manifold::Table
             field.Display = EqualsNoCase(display, "hexadecimal") ? FieldDisplay::Hex : EqualsNoCase(display, "signed integer") ? FieldDisplay::Signed :
                 EqualsNoCase(display, "binary") ? FieldDisplay::Binary : FieldDisplay::Unsigned;
             field.ChildStructure = element.Attribute("ChildStruct").value_or("");
+            field.ChildStructStart = element.Attribute("ChildStructStart").value_or("");
+            field.BackgroundColor = element.Attribute("BackgroundColor").value_or("");
+            field.ExpandChangesAddress = element.Attribute("ExpandChangesAddress").value_or("");
             if (field.Type == Scan::ValueType::Binary)
             {
                 field.BitStart = static_cast<int>(std::clamp<std::int64_t>(ParseDecimal(element.Attribute("BitStart").value_or("0")).value_or(0), 0, 63));
@@ -418,6 +421,12 @@ namespace Manifold::Table
             }
             if (!field.ChildStructure.empty())
                 element.SetAttribute("ChildStruct", field.ChildStructure);
+            if (!field.ChildStructStart.empty())
+                element.SetAttribute("ChildStructStart", field.ChildStructStart);
+            if (!field.BackgroundColor.empty())
+                element.SetAttribute("BackgroundColor", field.BackgroundColor);
+            if (!field.ExpandChangesAddress.empty())
+                element.SetAttribute("ExpandChangesAddress", field.ExpandChangesAddress);
             return element;
         }
     }

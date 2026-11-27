@@ -512,6 +512,34 @@ namespace Manifold::Tests
                 CHECK(loaded.Structures[0]->Fields.size() == 2 && loaded.Structures[0]->Fields[1].CustomType == "Obscured" && loaded.Structures[1]->Fields[0].CustomType == "Obscured");
         }
 
+        void TableStructureElementAttributes()
+        {
+            const std::string input = "<CheatTable><CheatEntries/><Structures StructVersion=\"2\">"
+                "<Structure Name=\"A\"><Elements>"
+                "<Element Offset=\"8\" Vartype=\"Pointer\" Bytesize=\"8\" ExpandChangesAddress=\"1\" DisplayMethod=\"unsigned integer\" ChildStructStart=\"16\" BackgroundColor=\"80FF80\" ChildStruct=\"B\"/>"
+                "</Elements></Structure>"
+                "<Structure Name=\"B\"><Elements><Element Offset=\"16\" Vartype=\"4 Bytes\" Bytesize=\"4\" Description=\"Ammo\" DisplayMethod=\"unsigned integer\"/></Elements></Structure>"
+                "</Structures></CheatTable>";
+            Table::LoadedTable loaded;
+            CHECK(Table::ParseTable(input, loaded).Ok());
+            const std::string saved = Resave(loaded);
+            Xml::ParseResult parsed = Xml::Parse(saved);
+            const Xml::Node* structures = parsed.Root ? parsed.Root->Child("Structures") : nullptr;
+            const std::vector<const Xml::Node*> list = structures ? structures->ChildrenNamed("Structure") : std::vector<const Xml::Node*>();
+            CHECK(list.size() == 2);
+            if (list.size() != 2)
+                return;
+            const Xml::Node* pointer = list[0]->Child("Elements") ? list[0]->Child("Elements")->Child("Element") : nullptr;
+            const Xml::Node* ammo = list[1]->Child("Elements") ? list[1]->Child("Elements")->Child("Element") : nullptr;
+            CHECK(pointer && ammo);
+            if (!pointer || !ammo)
+                return;
+            CHECK_MSG(pointer->Attribute("ChildStructStart") == std::optional<std::string>("16"), "ChildStructStart lost on save: " + saved);
+            CHECK_MSG(pointer->Attribute("BackgroundColor") == std::optional<std::string>("80FF80"), "BackgroundColor lost on save: " + saved);
+            CHECK_MSG(pointer->Attribute("ExpandChangesAddress") == std::optional<std::string>("1"), "ExpandChangesAddress lost on save: " + saved);
+            CHECK(!ammo->Attribute("ChildStructStart") && !ammo->Attribute("BackgroundColor") && !ammo->Attribute("ExpandChangesAddress"));
+        }
+
         void AutoAssemblerOffline()
         {
             Asm::AaHost host;
@@ -2283,6 +2311,7 @@ hostileRan = true
         TableSectionsKept();
         TableDisassemblerComments();
         TableStructureCustomType();
+        TableStructureElementAttributes();
         AutoAssemblerOffline();
         CodeSearchHelpers();
         ScanKinds();
