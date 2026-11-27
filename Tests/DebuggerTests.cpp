@@ -340,6 +340,27 @@ namespace Manifold::Tests
         }
 
         {
+            const std::uint64_t flag = engine.Evaluate("TestTarget.g_faultsOn").value_or(0);
+            CHECK_MSG(flag, "in-process, slot reuse: no g_faultsOn");
+            int read = 0;
+            CHECK(debugger.StartWatch(Debug::WatchKind::Accesses, flag, 4, read).Ok());
+            Wait(engine, 300);
+            debugger.StopWatch(read);
+            int written = 0;
+            CHECK(debugger.StartWatch(Debug::WatchKind::Writes, flag, 4, written).Ok());
+            Wait(engine, 300);
+            Debug::Watch before;
+            CHECK(debugger.CopyWatch(read, before));
+            CHECK_MSG(!before.Entries.empty(), "in-process, slot reuse: the watch on g_faultsOn saw no access");
+            Debug::Watch after;
+            CHECK(debugger.CopyWatch(written, after));
+            CHECK_MSG(after.Entries.empty(), "in-process, slot reuse: the writes watch on g_faultsOn, which only the workers read, has " + std::to_string(after.Entries.size()) +
+                " writers, first " + (after.Entries.empty() ? std::string("-") : Hex(after.Entries.front().Instruction)));
+            debugger.RemoveWatch(written);
+            debugger.RemoveWatch(read);
+        }
+
+        {
             const std::uint64_t serial = debugger.Break().Serial;
             const Status hot = debugger.SetBreakpoint(work, Debug::BreakpointType::Execute, 1, false, Action(engine, "RCX == 1", {}, true));
             CHECK_MSG(hot.Ok(), hot.Text);

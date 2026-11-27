@@ -792,12 +792,15 @@ namespace
         bool breakHit = false;
         std::uint64_t breakAddr = 0;
         std::uint32_t breakSlot = 0;
+        std::uint64_t addresses[4] = {};
+        std::uint64_t dr7 = 0;
+        BuildRegisters(block, addresses, dr7);
         for (int slot = 0; slot < kMaxWatches; ++slot)
         {
             const Watch& watch = block->Watches[slot];
             if (!watch.Active)
                 continue;
-            if ((dr6 & (1ull << slot)) && DebugAddress(context, slot) == watch.Address)
+            if ((dr6 & (1ull << slot)) && DebugAddress(context, slot) == watch.Address && (((context.Dr7 ^ dr7) >> (16 + slot * 4)) & 0xF) == 0)
             {
                 if (Breaks(watch.Mode))
                 {
@@ -818,8 +821,6 @@ namespace
         }
         if (breakHit)
             EnterBreak(block, context, breakAddr, breakSlot);
-        std::uint64_t addresses[4] = {};
-        std::uint64_t dr7 = 0;
         BuildRegisters(block, addresses, dr7);
         SetDebugRegisters(context, addresses, dr7);
         context.EFlags |= kResumeFlag;
