@@ -82,6 +82,15 @@ namespace Manifold::Tests
                 package.loaded["oldstyletest.mod"] = nil
                 oldstyletest = nil
                 return "ok")LUA");
+            LuaCheck(engine, "module with the loader's file name", R"LUA(
+                package.loaded.oldstyle2 = nil
+                local chunk = assert(loadstring("module(...)\nvalue = 7"))
+                local ok, problem = pcall(chunk, "oldstyle2", [[C:\fake\oldstyle2.lua]])
+                if not ok then return "module(...) with the file name: " .. tostring(problem) end
+                if package.loaded.oldstyle2 == nil or package.loaded.oldstyle2.value ~= 7 then return "value" end
+                package.loaded.oldstyle2 = nil
+                oldstyle2 = nil
+                return "ok")LUA");
             LuaCheck(engine, "defines", R"LUA(
                 if vtDword ~= 2 or vtAutoAssembler ~= 11 or soExactValue ~= 1 or mrhToggleActivation ~= 0 or mrhDecreaseValue ~= 7 then return "constants" end
                 if clDefault ~= 0x20000000 or rtTruncated ~= 2 or fsmAligned ~= 1 then return "more constants" end

@@ -160,7 +160,9 @@ if module == nil and debug ~= nil and debug.getinfo and debug.setupvalue then
       end
     end
     for _, option in ipairs({ ... }) do
-      option(result)
+      if type(option) == "function" then
+        option(result)
+      end
     end
     return result
   end
