@@ -950,6 +950,16 @@ namespace Manifold::Tests
                 const long after = count();
                 CHECK_MSG(after > before, "foreign single step: the target's own single steps stopped arriving while the in-process debugger was attached (" +
                     std::to_string(before) + " -> " + std::to_string(after) + ", dr6 without a debugger " + seen + ")");
+                const std::uint64_t quiet = engine.Evaluate("TestTarget.mfGapHigh").value_or(0);
+                int watch = 0;
+                CHECK(quiet && engine.Debugger().StartWatch(Debug::WatchKind::Writes, quiet, 1, watch).Ok());
+                Wait(engine, 400);
+                const long armed = count();
+                Wait(engine, 500);
+                const long later = count();
+                CHECK_MSG(later > armed, "foreign single step: the target's own single steps stopped arriving while a watch ran (" + std::to_string(armed) + " -> " +
+                    std::to_string(later) + ", last dr6 " + lastDr6() + ")");
+                engine.Debugger().RemoveWatch(watch);
                 engine.Debugger().Detach();
                 Wait(engine, 400);
             }

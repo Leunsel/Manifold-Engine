@@ -779,7 +779,7 @@ namespace
         }
         CONTEXT& context = *info->ContextRecord;
         const std::uint64_t dr6 = context.Dr6;
-        if ((dr6 & 0xF) == 0 && (context.Dr7 & 0xFF) == 0)
+        if ((dr6 & 0xF) == 0 && ((context.Dr7 & 0xFF) == 0 || (dr6 & 0x4000) != 0))
             return EXCEPTION_CONTINUE_SEARCH;
         const DWORD tid = ::GetCurrentThreadId();
         MarkActive(tid);
