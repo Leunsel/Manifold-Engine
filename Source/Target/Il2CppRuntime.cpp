@@ -469,7 +469,7 @@ namespace Manifold::Target
         {
             failed = true;
         }
-        if (failed)
+        if (failed || m_bridge.m_failedCalls != failures)
         {
             forget();
             return;

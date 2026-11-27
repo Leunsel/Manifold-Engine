@@ -823,7 +823,16 @@ extern "C"
         return *slot;
     }
     __declspec(dllexport) const char* il2cpp_method_get_name(const FakeMethodInfo* method) { return method->Name; }
-    __declspec(dllexport) unsigned il2cpp_method_get_param_count(const FakeMethodInfo* method) { return method->ParamCount; }
+    __declspec(dllexport) volatile long g_il2cppMethodStall = 0;
+    __declspec(dllexport) unsigned il2cpp_method_get_param_count(const FakeMethodInfo* method)
+    {
+        if (g_il2cppMethodStall)
+        {
+            g_il2cppMethodStall = 0;
+            ::Sleep(6000);
+        }
+        return method->ParamCount;
+    }
     __declspec(dllexport) const FakeFieldInfo* il2cpp_class_get_fields(const FakeIl2CppClass* klass, void** iter)
     {
         if (!iter || !klass->FieldCount)

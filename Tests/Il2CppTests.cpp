@@ -117,6 +117,22 @@ namespace Manifold::Tests
             }
             CHECK_MSG(after && names == "health@18,ammo@1C,speed@20", "Game.Player after a field read that stalled: " + names);
         }
+
+        void CheckMethodStall(Engine& engine)
+        {
+            const Target::Process& process = *engine.Process();
+            const std::string stem = std::filesystem::path(process.Name()).stem().string();
+            const std::uint64_t flag = engine.Evaluate(stem + ".g_il2cppMethodStall").value_or(0);
+            const std::int32_t stall = 1;
+            CHECK(flag && process.Write(flag, &stall, sizeof(stall)).Ok());
+            engine.Mono().ClassDetails("System.Collections.Generic.List`1");
+            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            CHECK_EQ(ReadInt(process, flag), 0);
+            const std::optional<Target::MonoClass> after = engine.Mono().ClassDetails("System.Collections.Generic.List`1");
+            CHECK_MSG(after && after->Generic && after->Methods.size() == 1 && after->Methods[0].Name == "Add" && after->Methods[0].ParamCount == 1,
+                Format("List`1 after a method read that stalled: %zu methods, %d parameters", after ? after->Methods.size() : 0,
+                    after && !after->Methods.empty() ? after->Methods[0].ParamCount : -1));
+        }
     }
 
     namespace
@@ -933,6 +949,7 @@ namespace Manifold::Tests
         engine.Managed().Reload(true);
         SettleMono(engine, 5000);
         CheckFieldStall(engine);
+        CheckMethodStall(engine);
         engine.Managed().Stop();
     }
 
