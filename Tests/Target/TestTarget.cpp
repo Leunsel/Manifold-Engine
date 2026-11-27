@@ -242,6 +242,7 @@ namespace
         Fail
     };
     AgentMode g_agentMode = AgentMode::Off;
+    bool g_openStall = false;
 
     const FakeMethod kAgentMethods[] = { { "Begin", nullptr }, { "Release", nullptr } };
     const FakeField kAgentFields[] = { { "State", 0, 0x08, 0x10 }, { "Types", 0, 0x08, 0x10 }, { "Cancel", 0, 0x08, 0x10 }, { "Data", 0, 0x18, 0x10 }, { "Size", 0, 0x08, 0x10 } };
@@ -407,6 +408,11 @@ extern "C"
     __declspec(dllexport) void* mono_image_open_from_data(char* data, unsigned int length, int needCopy, int* status)
     {
         static const char kName[] = "ManifoldDumper";
+        if (g_openStall)
+        {
+            g_openStall = false;
+            ::Sleep(6000);
+        }
         const bool dumper = g_agentMode != AgentMode::Off && data && needCopy && length > 0x200 && data[0] == 'M' && data[1] == 'Z'
             && std::search(data, data + length, kName, kName + sizeof(kName) - 1) != data + length;
         if (status)
@@ -1409,6 +1415,8 @@ int main(int argc, char** argv)
             g_agentMode = AgentMode::Unsure;
         else if (std::strcmp(argv[i], "--mono-agent=fail") == 0)
             g_agentMode = AgentMode::Fail;
+        else if (std::strcmp(argv[i], "--mono-open-stall") == 0)
+            g_openStall = true;
     }
     for (int i = 1; i < argc; ++i)
     {

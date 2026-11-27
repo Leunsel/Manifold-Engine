@@ -566,6 +566,29 @@ namespace Manifold::Tests
             engine.CloseProcess();
         }
 
+        // The runtime takes longer than the call's time limit to open the image: the call is
+        // still queued in the game, so the image's bytes must still be there when it runs.
+        void CheckOpenStall(const std::filesystem::path& targetPath)
+        {
+            AgentTarget target;
+            const bool started = target.Start(targetPath, L"--mono-agent --mono-open-stall");
+            CHECK_MSG(started, "could not start the test target with --mono-open-stall");
+            if (!started)
+                return;
+            Settings settings;
+            Engine engine(settings);
+            const Status opened = engine.OpenProcess(MakeProcessId(target.Info.dwProcessId));
+            CHECK_MSG(opened.Ok(), opened.Text);
+            if (!opened)
+                return;
+            engine.Managed().Ensure();
+            DWORD code = STILL_ACTIVE;
+            for (int i = 0; i < 150 && ::GetExitCodeProcess(target.Info.hProcess, &code) && code == STILL_ACTIVE; ++i)
+                ::Sleep(20);
+            CHECK_MSG(code == STILL_ACTIVE, "the game ended with " + Hex(code, 8) + " after a slow open of the managed image");
+            engine.CloseProcess();
+        }
+
         void CheckAgentTarget(const std::filesystem::path& targetPath)
         {
             CheckChildDomain(targetPath);
@@ -576,6 +599,7 @@ namespace Manifold::Tests
                 return;
             }
             CheckValueTypes(targetPath, L"--mono-agent --mono-values");
+            CheckOpenStall(targetPath);
             for (const wchar_t* mode : { L"--mono-agent", L"--mono-agent=bad-handles", L"--mono-agent=bad-offsets", L"--mono-agent=unsure", L"--mono-agent=fail" })
                 CheckAgentMode(targetPath, mode);
         }

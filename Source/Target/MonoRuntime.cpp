@@ -355,10 +355,12 @@ namespace Manifold::Target
                 return buffer.Error();
             const Status written = process.Write(*buffer, bytes);
             const std::uint64_t status = call.Scratch(8);
-            const std::uint64_t opened = written && status
-                ? m_bridge.CallFn("mono_image_open_from_data", *buffer, bytes.size(), 1, status).value_or(0)
-                : 0;
-            process.Free(*buffer);
+            const std::optional<std::uint64_t> answer = written && status
+                ? m_bridge.CallFn("mono_image_open_from_data", *buffer, bytes.size(), 1, status)
+                : std::optional<std::uint64_t>(0);
+            const std::uint64_t opened = answer.value_or(0);
+            if (answer)
+                process.Free(*buffer);
             if (!opened)
             {
                 std::int32_t code = -1;
