@@ -535,7 +535,6 @@ namespace Manifold::Lua
             Target::CodeCallRequest request;
             request.Function = address;
             request.Arguments.push_back({ Target::CodeCallKind::Integer, parameter });
-            request.TimeoutMilliseconds = 10000;
             if (!lua_isnoneornil(state, 3))
             {
                 const lua_Integer timeout = luaL_checkinteger(state, 3);

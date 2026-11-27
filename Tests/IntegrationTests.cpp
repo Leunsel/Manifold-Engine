@@ -57,6 +57,11 @@ namespace Manifold::Tests
             if not autoAssemble(string.format('%X:\n%s', slowStub, slow)) then return 'the slow stub did not assemble' end
             local timedOut, late = executeCode(slowStub, 0, 100)
             if timedOut ~= nil or not late then return 'executeCode ignored its timeout: ' .. tostring(timedOut) end
+            local patientStub = allocateMemory(0x100)
+            local patient = wide and 'sub rsp,28\nmov ecx,#10500\nmov rax,kernel32.Sleep\ncall rax\nadd rsp,28\nmov eax,2A\nret' or 'push #10500\nmov eax,kernel32.Sleep\ncall eax\nmov eax,2A\nret 4'
+            if not autoAssemble(string.format('%X:\n%s', patientStub, patient)) then return 'the patient stub did not assemble' end
+            local waited, reason = executeCode(patientStub, 0)
+            if waited ~= 42 then return 'executeCode without a timeout gave ' .. tostring(waited) .. ' ' .. tostring(reason) end
 
             local probe = readPointer(module .. '.g_callProbe')
             local add = readPointer(readPointer(probe))
