@@ -52,12 +52,14 @@ namespace Manifold::Lua
             lua_pop(state, 1);
         }
 
-        void ReadInt(lua_State* state, int table, const char* key, int& value)
+        void ReadInt(lua_State* state, int table, const char* key, int& value, lua_Integer most = 4096)
         {
             if (!Field(state, table, key))
                 return;
-            if (lua_isinteger(state, -1))
-                value = static_cast<int>(std::clamp<lua_Integer>(lua_tointeger(state, -1), 0, 4096));
+            int whole = 0;
+            const lua_Integer number = lua_type(state, -1) == LUA_TNUMBER ? lua_tointegerx(state, -1, &whole) : 0;
+            if (whole)
+                value = static_cast<int>(std::clamp<lua_Integer>(number, 0, most));
             lua_pop(state, 1);
         }
 
@@ -231,7 +233,7 @@ namespace Manifold::Lua
                 lua_pop(state, 1);
             }
             int limit = 100;
-            ReadInt(state, 2, "limit", limit);
+            ReadInt(state, 2, "limit", limit, 100000);
             limit = std::clamp(limit, 1, 100000);
             Scan::PatternFilter filter;
             if (Field(state, 2, "executable"))

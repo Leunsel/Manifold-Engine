@@ -522,6 +522,23 @@ namespace Manifold::Tests
                 "assert(manifold.has('signature.make') and manifold.apiVersion >= 1)\n";
             const Status status = lua.Run(script, "signature api");
             CHECK_MSG(status.Ok(), status.Text);
+
+            Block many(64 * 1024, PAGE_EXECUTE_READWRITE);
+            if (!many.Data)
+                return;
+            std::random_device random;
+            std::vector<std::uint8_t> marker(8);
+            for (std::size_t i = 0; i < marker.size(); ++i)
+                marker[i] = static_cast<std::uint8_t>(((i + 1) << 4) | (random() & 0x0F));
+            const std::string pattern = HexBytes(marker);
+            for (std::size_t copy = 0; copy < 5000; ++copy)
+                many.Put(copy * marker.size(), marker);
+            std::string counts;
+            const Status limits = lua.RunWithResult("local pattern = '" + pattern + "'\n"
+                "local large = #assert(manifold.signature.find(pattern, { executable = true, limit = 10000 }))\n"
+                "local float = #assert(manifold.signature.find(pattern, { executable = true, limit = 300.0 }))\n"
+                "return large .. ' ' .. float", "signature limits", counts);
+            CHECK_MSG(limits.Ok() && counts == "5000 300", limits.Ok() ? counts : limits.Text);
         }
 
         void Speed(const Target::Process& process, const Disasm::Disassembler& disassembler)
