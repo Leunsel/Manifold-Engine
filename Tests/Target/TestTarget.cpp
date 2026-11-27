@@ -836,7 +836,16 @@ extern "C"
         return field;
     }
     __declspec(dllexport) const char* il2cpp_field_get_name(const FakeFieldInfo* field) { return field->Name; }
-    __declspec(dllexport) std::size_t il2cpp_field_get_offset(const FakeFieldInfo* field) { return static_cast<std::size_t>(field->Offset); }
+    __declspec(dllexport) volatile long g_il2cppFieldStall = 0;
+    __declspec(dllexport) std::size_t il2cpp_field_get_offset(const FakeFieldInfo* field)
+    {
+        if (g_il2cppFieldStall)
+        {
+            g_il2cppFieldStall = 0;
+            ::Sleep(6000);
+        }
+        return static_cast<std::size_t>(field->Offset);
+    }
     __declspec(dllexport) const FakeIl2CppType* il2cpp_field_get_type(const FakeFieldInfo* field) { return field->Type; }
     __declspec(dllexport) int il2cpp_field_get_flags(const FakeFieldInfo* field) { return field->Flags; }
     __declspec(dllexport) int il2cpp_type_get_type(const FakeIl2CppType* type) { return type->Type; }

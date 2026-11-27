@@ -97,6 +97,26 @@ namespace Manifold::Tests
             }
             return nullptr;
         }
+
+        void CheckFieldStall(Engine& engine)
+        {
+            const Target::Process& process = *engine.Process();
+            const std::string stem = std::filesystem::path(process.Name()).stem().string();
+            const std::uint64_t flag = engine.Evaluate(stem + ".g_il2cppFieldStall").value_or(0);
+            const std::int32_t stall = 1;
+            CHECK(flag && process.Write(flag, &stall, sizeof(stall)).Ok());
+            engine.Mono().ClassDetails("Game.Player");
+            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            CHECK_EQ(ReadInt(process, flag), 0);
+            const std::optional<Target::MonoClass> after = engine.Mono().ClassDetails("Game.Player");
+            std::string names;
+            if (after)
+            {
+                for (const Target::MonoField& field : after->Fields)
+                    names += (names.empty() ? "" : ",") + field.Name + Format("@%X", field.Offset);
+            }
+            CHECK_MSG(after && names == "health@18,ammo@1C,speed@20", "Game.Player after a field read that stalled: " + names);
+        }
     }
 
     namespace
@@ -910,6 +930,9 @@ namespace Manifold::Tests
         engine.Managed().Reload(true);
         SettleMono(engine, 5000);
         CheckFrozenWorker(engine, "Game.Player", 4, 3);
+        engine.Managed().Reload(true);
+        SettleMono(engine, 5000);
+        CheckFieldStall(engine);
         engine.Managed().Stop();
     }
 

@@ -418,6 +418,7 @@ namespace Manifold::Target
         // and a plausible name where the runtime keeps them), and IL2CPP never
         // frees class metadata, so the pointer cannot have gone stale.
         const std::uint64_t klass = info.Handle;
+        const std::uint64_t failures = m_bridge.m_failedCalls;
         const auto parent = m_bridge.CallFn("il2cpp_class_get_parent", klass);
         bool failed = !parent && m_bridge.Fn("il2cpp_class_get_parent");
         const auto forget = [&info]
@@ -497,6 +498,11 @@ namespace Manifold::Target
                     m_bridge.DescribeValueType("il2cpp_", m_bridge.CallFn("il2cpp_class_from_type", *type).value_or(0), field);
             }
             info.Fields.push_back(std::move(field));
+        }
+        if (m_bridge.m_failedCalls != failures)
+        {
+            forget();
+            return;
         }
         info.ValueTypesRead = true;
         m_bridge.m_call.ResetScratch();
