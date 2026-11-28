@@ -307,6 +307,39 @@ namespace Manifold::Tests
             debugger.Resume(Debug::ResumeMode::Continue);
         Wait(engine, 100);
         CHECK_MSG(engine.Process()->Alive(), std::string(backend) + ": the target died");
+
+        // Work runs every millisecond: a first hit that comes while the trace is still setting its breakpoint is its first step
+        int hung = 0;
+        int short_ = 0;
+        for (int round = 0; round < 40 && engine.Process()->Alive(); ++round)
+        {
+            Debug::TraceRequest quick;
+            quick.Address = work;
+            quick.Count = 3;
+            quick.StepOver = veh;
+            const Status again = tracer.Start(engine.Process(), engine.Disassembler(), quick);
+            if (!again)
+            {
+                CHECK_MSG(false, std::string(backend) + ": trace " + std::to_string(round) + ": " + again.Text);
+                break;
+            }
+            const auto limit = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+            while (tracer.Running() && std::chrono::steady_clock::now() < limit)
+                Wait(engine, 20);
+            if (tracer.Running())
+            {
+                ++hung;
+                tracer.Stop();
+                continue;
+            }
+            const std::vector<Debug::TraceStep> quickSteps = tracer.Steps();
+            if (quickSteps.size() != 3 || quickSteps.front().Address != work || debugger.HasBreakpoint(work))
+                ++short_;
+        }
+        CHECK_MSG(hung == 0, std::string(backend) + ": " + std::to_string(hung) + " of 40 traces missed the first hit of their own breakpoint and kept waiting");
+        CHECK_MSG(short_ == 0, std::string(backend) + ": " + std::to_string(short_) + " of 40 traces ended without 3 steps from Work or left the breakpoint set");
+        if (debugger.Broken())
+            debugger.Resume(Debug::ResumeMode::Continue);
     }
 
     void CheckSlotReuse(Engine& engine)

@@ -80,6 +80,9 @@ namespace Manifold::Debug
         SetThreadName(L"Tracer");
         BreakAction action = request.Trigger;
         action.Break = true;
+        // ∑ Read before the breakpoint is set: a hit that comes while SetBreakpoint returns would have this number already,
+        //   and the trace would wait for ever beside the stopped process.
+        std::uint64_t lastSerial = m_debugger.Break().Serial;
         const Status set = m_debugger.SetBreakpoint(request.Address, BreakpointType::Execute, 1, false, action);
         if (!set)
         {
@@ -87,7 +90,6 @@ namespace Manifold::Debug
             return;
         }
 
-        std::uint64_t lastSerial = m_debugger.Break().Serial;
         const auto waitForBreak = [&]() -> bool
             {
                 while (!m_cancel && m_debugger.Attached() && m_process->Alive())
