@@ -364,8 +364,9 @@ namespace Manifold::Scan
             }
 
             // ∑ The struct in memory changes with every new key, the value does not: compares go to the decoded
-            //   value, and only a struct that reads as a set ACTk value counts, which keeps zeroed memory out.
-            bool TestObscured(const std::uint8_t* now, const std::uint8_t* previous, const std::uint8_t* first) const
+            //   value, and only a struct that reads as a set ACTk value counts, which keeps zeroed memory out. Out of line:
+            //   inlined into Test it made the next scan over stored results about 10 % slower for every other type.
+            __declspec(noinline) bool TestObscured(const std::uint8_t* now, const std::uint8_t* previous, const std::uint8_t* first) const
             {
                 std::uint8_t plainNow[16]{};
                 std::uint8_t plainPrevious[16]{};
