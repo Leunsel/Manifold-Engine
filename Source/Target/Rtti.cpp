@@ -631,7 +631,12 @@ namespace Manifold::Target
                     std::vector<std::uint8_t> locator;
                     Append(locator, type->Locator, m_pointer);
                     for (const std::uint64_t at : ScanImage(locator, std::vector<std::uint8_t>(locator.size(), 0xFF), image, pointer, 64, stop))
+                    {
+                        const std::vector<RegionInfo> region = m_process->Regions(at, at + 1);
+                        if (!region.empty() && region.front().Executable() && !region.front().Writable())
+                            continue;
                         TableClass(at + pointer, true);
+                    }
                 }
             }
             if (stop && stop())

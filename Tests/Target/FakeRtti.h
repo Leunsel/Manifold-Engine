@@ -173,6 +173,14 @@ namespace FakeRtti
 
     inline int Stub() { return 7; }
 
+    // ∑ Room in the code section for a pointer to a good locator followed by a function pointer: what a function table looks
+    //   like, but in code. 32-bit code holds such words by chance (a call's displacement that equals a locator's address at
+    //   one load address); real function tables never sit in executable memory.
+    [[gnu::naked, gnu::aligned(16)]] static void CodeSlot()
+    {
+        __asm__(".fill 32,1,0x90");
+    }
+
     class Builder
     {
     public:
@@ -214,6 +222,12 @@ namespace FakeRtti
             Locate(LBadCountHuge, TBase, CBadCountHuge, 0);
             Locate(LBadName, TBadName, CBadName, 0);
             s.Locators[LBadSignature].Signature = 7;
+            const std::uintptr_t inCode[2] = { reinterpret_cast<std::uintptr_t>(&s.Locators[LBase]), reinterpret_cast<std::uintptr_t>(&Stub) };
+            DWORD protect = 0;
+            if (!::VirtualProtect(reinterpret_cast<void*>(&CodeSlot), sizeof(inCode), PAGE_EXECUTE_READWRITE, &protect))
+                return false;
+            std::memcpy(reinterpret_cast<void*>(&CodeSlot), inCode, sizeof(inCode));
+            ::VirtualProtect(reinterpret_cast<void*>(&CodeSlot), sizeof(inCode), protect, &protect);
             if (kWord == 8)
                 s.Locators[LBadSelf].Self += 4;
             else
