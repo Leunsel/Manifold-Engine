@@ -70,8 +70,17 @@ namespace Manifold
 
     void MainThreadQueue::Post(std::function<void()> work)
     {
-        std::lock_guard lock(m_lock);
-        m_work.push_back(std::move(work));
+        {
+            std::lock_guard lock(m_lock);
+            m_work.push_back(std::move(work));
+        }
+        m_posted.notify_all();
+    }
+
+    bool MainThreadQueue::WaitForWork(std::chrono::milliseconds timeout) const
+    {
+        std::unique_lock lock(m_lock);
+        return m_posted.wait_for(lock, timeout, [this] { return !m_work.empty(); });
     }
 
     void MainThreadQueue::RunAndWait(const std::function<void()>& work)

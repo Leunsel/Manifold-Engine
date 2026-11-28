@@ -579,9 +579,16 @@ namespace Manifold
     {
         if (m_running)
         {
-            if (m_running->Result.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            // ∑ Every name the worker looks up and every custom command waits here for the main thread. Served once a tick,
+            //   a script with 140 such trips took a second; served while they keep coming, within the budget, it takes a tick.
+            const double serveUntil = m_engine.Now() + budgetSeconds;
+            while (m_running && m_running->Result.wait_for(std::chrono::seconds(0)) != std::future_status::ready && m_engine.Now() < serveUntil &&
+                   m_mainQueue.WaitForWork(std::chrono::milliseconds(1)))
+                DrainMainWork();
+            if (m_running && m_running->Result.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
                 return;
-            FinishActivation();
+            if (m_running)
+                FinishActivation();
         }
         const bool tableScript = m_tableTask && m_engine.Lua().TaskAlive(m_tableTask);
         const double deadline = m_engine.Now() + budgetSeconds;

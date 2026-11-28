@@ -1296,12 +1296,24 @@ namespace Manifold::Tests
                 // one asked before the program's own names is still asked from the worker
                 CHECK(engine.Lua().Run("lookupFirst = registerSymbolLookupCallback(function(name) if name == 'lookupviafirst' then return getAddress('asyncmem') + 8 end end, 0)",
                     "lookup first").Ok());
-                Table::MemoryRecord& firstScript = engine.Table().AddScript("async first lookup", "[ENABLE]\nalloc(firstmem,16)\nfirstmem:\ndq lookupviafirst\n[DISABLE]\ndealloc(firstmem)\n");
+                std::string firstLookups = "[ENABLE]\nalloc(firstmem,$400)\nfirstmem:\n";
+                for (int i = 0; i < 60; ++i)
+                    firstLookups += "dq lookupviafirst\n";
+                firstLookups += "[DISABLE]\ndealloc(firstmem)\n";
+                Table::MemoryRecord& firstScript = engine.Table().AddScript("async first lookup", firstLookups);
                 const int firstId = firstScript.Id;
                 engine.RequestActive(firstScript, true);
-                CHECK(pump([&]() { return !engine.Working(); }));
+                int firstTicks = 0;
+                while (engine.Working() && firstTicks < 2000)
+                {
+                    engine.Tick();
+                    ++firstTicks;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(15));
+                }
                 Table::MemoryRecord* firstDone = engine.Table().FindById(firstId);
                 CHECK_MSG(firstDone && firstDone->Active, firstDone ? firstDone->LastError : std::string("gone"));
+                // each of these lookups has to go to the main thread: the Lua resolver is asked first
+                CHECK_MSG(firstTicks < 10, "60 trips of the activation worker to the main thread took " + std::to_string(firstTicks) + " ticks");
                 if (firstDone && firstDone->Active && asyncBlock && !firstDone->ScriptMemory.Allocations.empty())
                     CHECK_EQ(process.ReadValue<std::uint64_t>(firstDone->ScriptMemory.Allocations.front().Address).value_or(0), *asyncBlock + 8);
                 if (firstDone)

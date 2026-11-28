@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <deque>
 #include <functional>
@@ -19,9 +21,11 @@ namespace Manifold
         void RunAndWait(const std::function<void()>& work);
         std::size_t Drain();
         bool Empty() const;
+        bool WaitForWork(std::chrono::milliseconds timeout) const;
 
     private:
         mutable std::mutex m_lock;
+        mutable std::condition_variable m_posted;
         std::deque<std::function<void()>> m_work;
     };
 }
