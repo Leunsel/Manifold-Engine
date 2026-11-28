@@ -310,6 +310,8 @@ copies the Release build into `Install` (or `-Destination`). The program there k
 | [Architecture](Docs/ARCHITECTURE.md) | layers, threads, and where new code goes |
 | [UI layout](Docs/UI-LAYOUT.md) | the layout system every window is drawn on, its audit and the lock on raw ImGui calls |
 
+Results of bug hunts and measurements are in [Reports](Reports), the goals of each release in [Milestones](Milestones).
+
 ## Credits
 
 Manifold Engine is made by Leunsel, with the help of:

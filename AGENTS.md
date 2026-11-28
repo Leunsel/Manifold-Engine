@@ -9,7 +9,7 @@ These rules bind everyone who changes this repository, people and AI agents alik
 3. **Positive claims need proof too.** "Faster", "no longer allocates", "cannot race" and "safe" are hypotheses until a test or a measurement shows them.
 4. **Never weaken a test to get green.** Do not loosen, skip, narrow or delete a failing check. A test that fails when you did not expect it is a finding: find the mechanism.
 5. **Fix only what the evidence shows.** Do not widen a fix into hardening, refactoring or a redesign because the code nearby looks suspicious.
-6. **Nothing is swept under the rug.** A suspicion you cannot show is neither fixed nor dropped. Write it down where the maintainer sees it (the bug hunt list in `Docs`, or an issue): what it is, the exact conditions, and how it could be shown.
+6. **Nothing is swept under the rug.** A suspicion you cannot show is neither fixed nor dropped. Write it down where the maintainer sees it (the bug hunt list in `Reports/BugHunts`, or an issue): what it is, the exact conditions, and how it could be shown.
 7. **Label claims.** Say what you observed in a run, what you read in the code, and what you assume. Never present an unobserved result as fact.
 
 ## Keep fixes small
