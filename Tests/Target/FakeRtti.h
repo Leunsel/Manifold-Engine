@@ -73,7 +73,7 @@ namespace FakeRtti
         Word Dog, Duck, DuckWalker, Swimmer, SwimmerAnimal, Fish, FishAnimal, Keeper, KeeperPet, KeeperAfter, KeeperSize, Cage;
         Word Base, Derived, Multi, MultiSecond, Virt, VirtPart, Owner, OwnerPart, OwnerSize;
         Word TableBase, TableMulti, TableMultiSecond, TablePart;
-        Word BadSignature, BadSelf, BadCount, BadCountHuge, BadName, Plain;
+        Word BadSignature, BadSelf, BadCount, BadCountHuge, BadName, Plain, CodeObject;
     };
 
     using Image = ImageOf<std::uintptr_t>;
@@ -164,6 +164,7 @@ namespace FakeRtti
         std::uintptr_t PadOwner[kPad];
         std::uintptr_t Bad[5][2];
         std::uintptr_t PadBad[kPad];
+        std::uintptr_t CodeObject[2];
     };
 
     inline Real g_real;
@@ -294,6 +295,8 @@ namespace FakeRtti
             Fake.BadCountHuge = Address(&s.Bad[3][0]);
             Fake.BadName = Address(&s.Bad[4][0]);
             Fake.Plain = Address(&s.PadBase[kPad / 2]);
+            s.CodeObject[0] = reinterpret_cast<std::uintptr_t>(&CodeSlot) + kWord;
+            Fake.CodeObject = Address(&s.CodeObject[0]);
             return m_base != 0 && r.Dog.Legs() == 4;
         }
 

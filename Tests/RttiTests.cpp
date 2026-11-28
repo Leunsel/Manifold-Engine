@@ -217,6 +217,13 @@ namespace Manifold::Tests
             CHECK_MSG(tables.size() == 2 && tables[0].Address == f.TableMulti && tables[0].Offset == 0 && tables[0].Symbol == "Synth::Multi::vftable" &&
                 tables[1].Address == f.TableMultiSecond && tables[1].Symbol == "Synth::Multi::vftable@Synth::Second" && tables[1].Module == process->Name(), label);
             CHECK_MSG(fresh.Tables("Synth::Base").size() == 1, std::string(label) + ": the rejected locators count as tables of Synth::Base");
+            {
+                RttiRuntime viaObject(process);
+                const auto inCode = viaObject.ObjectAt(f.CodeObject);
+                CHECK_MSG(!inCode.has_value(), std::string(label) + ": an object whose first word points behind a locator pointer in code is a " + (inCode ? inCode->Class->Name : std::string()));
+                const auto primary = viaObject.Primary("Synth::Base");
+                CHECK_MSG(primary && primary->first == f.TableBase, std::string(label) + ": after that object the table of Synth::Base is " + (primary ? Hex(primary->first) : std::string("missing")));
+            }
             CHECK(!fresh.Primary("Synth::Second").has_value() && !fresh.Primary("Synth::Nope").has_value() && !fresh.Primary("Synth::Nope").has_value());
             CHECK(!fresh.Primary("").has_value() && !fresh.Primary("Synth::Base<int>").has_value());
             const auto decorated = fresh.Primary(".?AVPart@Synth@@");
