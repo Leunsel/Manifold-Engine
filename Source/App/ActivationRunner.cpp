@@ -7,6 +7,7 @@
 #include "Lua/LuaEngine.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <future>
 
@@ -73,6 +74,7 @@ namespace Manifold
         int ViaParent = -1;
         std::shared_ptr<Target::Process> Process;
         std::future<Asm::AaResult> Result;
+        std::atomic<bool> Finished{ false };
     };
 
     ActivationRunner::ActivationRunner(Engine& engine) : m_engine(engine)
@@ -582,10 +584,9 @@ namespace Manifold
             // ∑ Every name the worker looks up and every custom command waits here for the main thread. Served once a tick,
             //   a script with 140 such trips took a second; served while they keep coming, within the budget, it takes a tick.
             const double serveUntil = m_engine.Now() + budgetSeconds;
-            while (m_running && m_running->Result.wait_for(std::chrono::seconds(0)) != std::future_status::ready && m_engine.Now() < serveUntil &&
-                   m_mainQueue.WaitForWork(std::chrono::milliseconds(1)))
+            while (m_running && !m_running->Finished && m_engine.Now() < serveUntil && m_mainQueue.WaitForWork(std::chrono::milliseconds(1)))
                 DrainMainWork();
-            if (m_running && m_running->Result.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
+            if (m_running && !m_running->Finished && m_running->Result.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
                 return;
             if (m_running)
                 FinishActivation();
@@ -749,7 +750,7 @@ namespace Manifold
         options.IncludeFolder = m_engine.Table().FilePath.empty() ? Paths::AutorunFolder() : std::filesystem::path(Utf8ToWide(m_engine.Table().FilePath)).parent_path();
         Asm::AaMemory* memory = &running->Memory;
         std::shared_ptr<Target::Process> process = m_engine.Process();
-        running->Result = std::async(std::launch::async, [this, script = record->Script, options, memory, process, recordId, identity]()
+        running->Result = std::async(std::launch::async, [this, script = record->Script, options, memory, process, recordId, identity, finished = &running->Finished]()
             {
                 SetThreadName(L"Script activation");
                 t_activationWorker = true;
@@ -779,6 +780,9 @@ namespace Manifold
                     };
                 Asm::AaResult result = Asm::RunAutoAssembler(script, host, *memory, options);
                 t_activationWorker = false;
+                // ∑ wakes the main thread's wait for the next request, which otherwise runs out only after a timer step (15.6 ms)
+                *finished = true;
+                m_mainQueue.Post([] {});
                 return result;
             });
         m_running = std::move(running);

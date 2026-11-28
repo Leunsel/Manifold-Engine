@@ -1321,6 +1321,28 @@ namespace Manifold::Tests
                     engine.RequestActive(*firstDone, false);
                     CHECK(pump([&]() { return !engine.Working(); }));
                 }
+
+                // the switch ends as soon as the worker is done, not when the main thread's wait for its next request runs out
+                Table::MemoryRecord& lastTrip = engine.Table().AddScript("async last trip", "[ENABLE]\nalloc(lastmem,16)\nlastmem:\ndq lookupviafirst\n[DISABLE]\ndealloc(lastmem)\n");
+                const int lastId = lastTrip.Id;
+                double slowest = 0;
+                for (int round = 0; round < 5; ++round)
+                {
+                    Table::MemoryRecord* record = engine.Table().FindById(lastId);
+                    if (!record)
+                        break;
+                    const auto clicked = std::chrono::steady_clock::now();
+                    engine.RequestActive(*record, !record->Active);
+                    while (engine.Working() && std::chrono::steady_clock::now() - clicked < std::chrono::seconds(10))
+                        engine.Tick();
+                    slowest = std::max(slowest, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - clicked).count());
+                }
+                CHECK_MSG(slowest < 8.0, Format("a switch with one trip to the main thread took up to %.1f ms", slowest));
+                if (Table::MemoryRecord* record = engine.Table().FindById(lastId); record && record->Active)
+                {
+                    engine.RequestActive(*record, false);
+                    CHECK(pump([&]() { return !engine.Working(); }));
+                }
                 engine.Lua().Run("unregisterSymbolLookupCallback(lookupFirst)", "lookup first");
             }
 
