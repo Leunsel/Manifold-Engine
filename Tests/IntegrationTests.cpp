@@ -1259,6 +1259,59 @@ namespace Manifold::Tests
             CHECK(engine.Lua().RunWithResult("return tostring(asyncFlag)", "async flag", flag).Ok());
             CHECK_EQ(flag, std::string("1"));
 
+            {
+                std::string lookups = "[ENABLE]\nalloc(lookupmem,$400)\nlookupmem:\n";
+                for (int i = 0; i < 60; ++i)
+                    lookups += "dq asyncmem\n";
+                lookups += "dq lookupviaresolver\n[DISABLE]\ndealloc(lookupmem)\n";
+                // a resolver asked after the program's own names, as the bundled Godot module registers one
+                CHECK(engine.Lua().Run("lookupResolver = registerSymbolLookupCallback(function(name) if name == 'lookupviaresolver' then return getAddress('asyncmem') end end, 5)",
+                    "lookup resolver").Ok());
+                Table::MemoryRecord& lookupScript = engine.Table().AddScript("async lookups", lookups);
+                const int lookupId = lookupScript.Id;
+                engine.RequestActive(lookupScript, true);
+                int ticks = 0;
+                while (engine.Working() && ticks < 2000)
+                {
+                    engine.Tick();
+                    ++ticks;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(15));
+                }
+                Table::MemoryRecord* switched = engine.Table().FindById(lookupId);
+                CHECK_MSG(switched && switched->Active, switched ? switched->LastError : std::string("gone"));
+                CHECK_MSG(ticks < 10, "60 symbol lookups on the activation worker took " + std::to_string(ticks) + " ticks of the main thread");
+                const auto asyncBlock = engine.Symbols().FindRegistered("asyncmem");
+                if (switched && switched->Active && asyncBlock)
+                {
+                    const std::uint64_t block = switched->ScriptMemory.Allocations.empty() ? 0 : switched->ScriptMemory.Allocations.front().Address;
+                    CHECK_EQ(process.ReadValue<std::uint64_t>(block + 60 * 8).value_or(0), *asyncBlock);
+                }
+                if (switched)
+                {
+                    engine.RequestActive(*switched, false);
+                    CHECK(pump([&]() { return !engine.Working(); }));
+                }
+                engine.Lua().Run("unregisterSymbolLookupCallback(lookupResolver)", "lookup resolver");
+
+                // one asked before the program's own names is still asked from the worker
+                CHECK(engine.Lua().Run("lookupFirst = registerSymbolLookupCallback(function(name) if name == 'lookupviafirst' then return getAddress('asyncmem') + 8 end end, 0)",
+                    "lookup first").Ok());
+                Table::MemoryRecord& firstScript = engine.Table().AddScript("async first lookup", "[ENABLE]\nalloc(firstmem,16)\nfirstmem:\ndq lookupviafirst\n[DISABLE]\ndealloc(firstmem)\n");
+                const int firstId = firstScript.Id;
+                engine.RequestActive(firstScript, true);
+                CHECK(pump([&]() { return !engine.Working(); }));
+                Table::MemoryRecord* firstDone = engine.Table().FindById(firstId);
+                CHECK_MSG(firstDone && firstDone->Active, firstDone ? firstDone->LastError : std::string("gone"));
+                if (firstDone && firstDone->Active && asyncBlock && !firstDone->ScriptMemory.Allocations.empty())
+                    CHECK_EQ(process.ReadValue<std::uint64_t>(firstDone->ScriptMemory.Allocations.front().Address).value_or(0), *asyncBlock + 8);
+                if (firstDone)
+                {
+                    engine.RequestActive(*firstDone, false);
+                    CHECK(pump([&]() { return !engine.Working(); }));
+                }
+                engine.Lua().Run("unregisterSymbolLookupCallback(lookupFirst)", "lookup first");
+            }
+
             Table::MemoryRecord& group = engine.Table().AddGroup("async group");
             group.Options.ActivateChildren = true;
             group.Options.DeactivateChildren = true;

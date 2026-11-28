@@ -142,6 +142,10 @@ namespace Manifold::Lua
             {
                 if (!Manifold::OnMainThread() && Engine::OnActivationWorker())
                 {
+                    // ∑ Each trip waits for the main thread's next tick, about 15 ms: a script that named 60 symbols took
+                    //   almost a second although no Lua callback of that place (first or last) was there to ask.
+                    if ((first ? m_firstSymbolLookups : m_lastSymbolLookups) == 0)
+                        return std::nullopt;
                     std::optional<std::uint64_t> result;
                     const std::string copy(name);
                     m_engine.RunOnMainAndWait([&]() { result = LookupSymbol(copy, first); });
@@ -805,6 +809,7 @@ namespace Manifold::Lua
     {
         const int id = m_nextSymbolCallback++;
         m_symbolLookups[id] = SymbolCallback{ reference, first };
+        ++(first ? m_firstSymbolLookups : m_lastSymbolLookups);
         return id;
     }
 
@@ -814,6 +819,7 @@ namespace Manifold::Lua
         if (found == m_symbolLookups.end())
             return false;
         Release(found->second.Reference);
+        --(found->second.First ? m_firstSymbolLookups : m_lastSymbolLookups);
         m_symbolLookups.erase(found);
         return true;
     }

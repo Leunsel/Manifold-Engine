@@ -512,6 +512,8 @@ namespace Manifold::Lua
             bool First = false;
         };
         std::map<int, SymbolCallback> m_symbolLookups;
+        std::atomic<int> m_firstSymbolLookups{ 0 };
+        std::atomic<int> m_lastSymbolLookups{ 0 };
         int m_nextSymbolCallback = 1;
         bool m_inSymbolLookup = false;
         int m_onOpenProcess = 0;
